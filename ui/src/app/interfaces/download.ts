@@ -14,6 +14,10 @@ export interface Download {
   chapter_template?: string;
   subtitle_language?: string;
   subtitle_mode?: string;
+  transcribe?: boolean;
+  transcription_language?: string;
+  transcription_result?: { winner: string, canonical: string, markdown?: string };
+  transcription_error?: string;
   ytdl_options_presets?: string[];
   ytdl_options_overrides?: Record<string, unknown>;
   clip_start?: number;

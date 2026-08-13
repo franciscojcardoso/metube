@@ -1,5 +1,5 @@
 import { DatePipe, KeyValuePipe, NgTemplateOutlet } from '@angular/common';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpEventType, HttpResponse } from '@angular/common/http';
 import { AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, ElementRef, viewChild, inject, OnDestroy, OnInit } from '@angular/core';
 import { Observable, OperatorFunction, Subject, Subscription, from, map, merge, debounceTime, distinctUntilChanged, filter, finalize, mergeMap, takeUntil, tap } from 'rxjs';
 import { FormsModule } from '@angular/forms';
@@ -7,7 +7,12 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FontAwesomeModule } from '@fortawesome/angular-fontawesome';
 import { NgbModule, NgbTypeahead } from '@ng-bootstrap/ng-bootstrap';
 import { NgSelectModule } from '@ng-select/ng-select';
-import { faTrashAlt, faCheckCircle, faTimesCircle, faRedoAlt, faSun, faMoon, faCheck, faCircleHalfStroke, faDownload, faExternalLinkAlt, faFileImport, faFileExport, faCopy, faClock, faTachometerAlt, faSortAmountDown, faSortAmountUp, faChevronRight, faChevronDown, faUpload, faPause, faPlay, faShareNodes } from '@fortawesome/free-solid-svg-icons';
+import { NzAlertModule } from 'ng-zorro-antd/alert';
+import { NzButtonModule } from 'ng-zorro-antd/button';
+import { NzCardModule } from 'ng-zorro-antd/card';
+import { NzInputModule } from 'ng-zorro-antd/input';
+import { NzSelectModule } from 'ng-zorro-antd/select';
+import { faTrashAlt, faCheckCircle, faTimesCircle, faRedoAlt, faSun, faMoon, faCheck, faCircleHalfStroke, faDownload, faExternalLinkAlt, faFileImport, faFileExport, faCopy, faClock, faTachometerAlt, faSortAmountDown, faSortAmountUp, faChevronRight, faChevronDown, faUpload, faPause, faPlay, faShareNodes, faFileLines, faFileAudio, faFolderOpen } from '@fortawesome/free-solid-svg-icons';
 import { faGithub } from '@fortawesome/free-brands-svg-icons';
 import { CookieService } from 'ngx-cookie-service';
 import { AddDownloadPayload, DownloadsService } from './services/downloads.service';
@@ -47,6 +52,11 @@ import { SelectAllCheckboxComponent, ItemCheckboxComponent, ToastContainerCompon
         FontAwesomeModule,
         NgbModule,
         NgSelectModule,
+        NzAlertModule,
+        NzButtonModule,
+        NzCardModule,
+        NzInputModule,
+        NzSelectModule,
         EtaPipe,
         SpeedPipe,
         FileSizePipe,
@@ -90,6 +100,17 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
   clipStart = '';
   clipEnd = '';
   subtitleLanguage: string;
+  transcribe = false;
+  transcriptionLanguage = 'auto';
+  localTranscriptionPath = '';
+  localTranscriptionInProgress = false;
+  transcriptionUploadProgress = 0;
+  transcriptionProgressPhase: 'idle' | 'uploading' | 'transcribing' = 'idle';
+  transcriptionResultStatus: 'success' | 'error' | null = null;
+  transcriptionResultTitle = '';
+  transcriptionResultMessage = '';
+  selectedTranscriptionFile: File | null = null;
+  activeWorkspaceTab: 'download' | 'transcribe' = 'download';
   subtitleMode: string;
   ytdlOptionsPresets: string[] = [];
   ytdlOptionsOverrides: string;
@@ -134,6 +155,8 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
   ytDlpVersion: string | null = null;
   metubeVersion: string | null = null;
   isAdvancedOpen = false;
+  desktopDownloadDir = '';
+  desktopSettingsSaving = false;
   sortAscending = false;
   expandedErrors: Set<string> = new Set<string>();
   cachedSortedDone: [string, Download][] = [];
@@ -198,6 +221,9 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
   faPause = faPause;
   faPlay = faPlay;
   faShareNodes = faShareNodes;
+  faFileLines = faFileLines;
+  faFileAudio = faFileAudio;
+  faFolderOpen = faFolderOpen;
   subtitleLanguages = [
     { id: 'en', text: 'English' },
     { id: 'ar', text: 'Arabic' },
@@ -262,6 +288,8 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
     this.clipEnd = this.cookieService.get('metube_clip_end') || '';
     this.subtitleLanguage = this.cookieService.get('metube_subtitle_language') || 'en';
     this.subtitleMode = this.cookieService.get('metube_subtitle_mode') || 'prefer_manual';
+    this.transcribe = this.cookieService.get('metube_transcribe') === 'true';
+    this.transcriptionLanguage = this.cookieService.get('metube_transcription_language') || 'auto';
     this.ytdlOptionsPresets = this.loadYtdlOptionsPresetsFromCookie();
     this.ytdlOptionsOverrides = this.cookieService.get('metube_ytdl_options_overrides') || '';
     const allowedDownloadTypes = new Set(this.downloadTypes.map(t => t.id));
@@ -430,6 +458,7 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
     this.downloads.configurationChanged.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       next: (config: any) => {
+        this.desktopDownloadDir = String(config['DESKTOP_DOWNLOAD_DIR'] ?? '');
         const playlistItemLimit = parseInt(String(config['DEFAULT_OPTION_PLAYLIST_ITEM_LIMIT'] ?? '0'), 10);
         if (!Number.isNaN(playlistItemLimit) && playlistItemLimit > 0) {
           this.playlistItemLimit = playlistItemLimit;
@@ -446,6 +475,26 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
         }
         this.cdr.markForCheck();
       }
+    });
+  }
+
+  saveDesktopSettings() {
+    const directory = this.desktopDownloadDir.trim();
+    if (!directory) {
+      this.toasts.error('Informe a pasta onde os arquivos serão salvos.');
+      return;
+    }
+    this.desktopSettingsSaving = true;
+    this.downloads.saveDesktopSettings(directory).subscribe({
+      next: () => {
+        this.toasts.success('Configuração salva. Reiniciando o MeTube...');
+        window.setTimeout(() => window.location.reload(), 1800);
+      },
+      error: (error: HttpErrorResponse) => {
+        this.desktopSettingsSaving = false;
+        this.toasts.error(error.error?.message || error.statusText || 'Não foi possível salvar a configuração.');
+        this.cdr.markForCheck();
+      },
     });
   }
 
@@ -881,6 +930,129 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
     this.saveSelection(this.downloadType);
   }
 
+  transcribeChanged() {
+    this.cookieService.set('metube_transcribe', this.transcribe ? 'true' : 'false', { expires: this.settingsCookieExpiryDays });
+  }
+
+  transcriptionLanguageChanged() {
+    this.cookieService.set('metube_transcription_language', this.transcriptionLanguage, { expires: this.settingsCookieExpiryDays });
+  }
+
+  transcriptionEnabled(): boolean {
+    return this.downloads.configuration['TRANSCRIPTION_ENABLED'] === true;
+  }
+
+  transcribeLocalFile() {
+    const path = this.localTranscriptionPath.trim();
+    if (!path || this.localTranscriptionInProgress) return;
+    this.localTranscriptionInProgress = true;
+    this.downloads.transcribeLocal(path, this.transcriptionLanguage).pipe(
+      finalize(() => {
+        this.localTranscriptionInProgress = false;
+        this.cdr.markForCheck();
+      }),
+    ).subscribe(res => {
+      const error = this.getStatusError(res);
+      if (error) {
+        this.toasts.error(error);
+      } else {
+        const markdown = 'result' in res ? res.result?.markdown : undefined;
+        this.toasts.info(`Transcrição concluída: ${markdown ?? path}`);
+        this.localTranscriptionPath = '';
+      }
+    });
+  }
+
+  onTranscriptionFileSelect(event: Event) {
+    const input = event.target as HTMLInputElement;
+    this.selectedTranscriptionFile = input.files?.[0] ?? null;
+    this.clearTranscriptionResult();
+    this.cdr.markForCheck();
+  }
+
+  clearTranscriptionResult() {
+    this.transcriptionResultStatus = null;
+    this.transcriptionResultTitle = '';
+    this.transcriptionResultMessage = '';
+  }
+
+  clearTranscriptionFile() {
+    this.selectedTranscriptionFile = null;
+    const input = document.querySelector<HTMLInputElement>('#transcription-file');
+    if (input) input.value = '';
+    this.cdr.markForCheck();
+  }
+
+  transcribeSelectedFile() {
+    const file = this.selectedTranscriptionFile;
+    if (!file || this.localTranscriptionInProgress) return;
+    this.clearTranscriptionResult();
+    this.localTranscriptionInProgress = true;
+    this.transcriptionUploadProgress = 0;
+    this.transcriptionProgressPhase = 'uploading';
+    this.downloads.transcribeUpload(file, this.transcriptionLanguage).pipe(
+      finalize(() => {
+        this.localTranscriptionInProgress = false;
+        this.transcriptionProgressPhase = 'idle';
+        this.cdr.markForCheck();
+      }),
+    ).subscribe(event => {
+      if (event instanceof HttpResponse) {
+        const res = event.body;
+        if (!res) return;
+        const error = this.getStatusError(res);
+        if (error) {
+          this.transcriptionResultStatus = 'error';
+          this.transcriptionResultTitle = 'Não foi possível transcrever o arquivo';
+          this.transcriptionResultMessage = error;
+          this.toasts.error(error);
+          this.cdr.markForCheck();
+          return;
+        }
+        const markdown = 'result' in res ? res.result?.markdown : undefined;
+        this.transcriptionResultStatus = 'success';
+        this.transcriptionResultTitle = 'Transcrição concluída';
+        this.transcriptionResultMessage = markdown
+          ? `Markdown salvo em: ${markdown}`
+          : 'O arquivo Markdown foi salvo ao lado da mídia.';
+        this.toasts.info(`Transcrição concluída${markdown ? `: ${markdown}` : ''}`);
+        this.clearTranscriptionFile();
+        this.cdr.markForCheck();
+        return;
+      }
+      if (event.type === HttpEventType.UploadProgress) {
+        this.transcriptionUploadProgress = event.total
+          ? Math.round((100 * event.loaded) / event.total)
+          : 0;
+        if (this.transcriptionUploadProgress >= 100) {
+          this.transcriptionProgressPhase = 'transcribing';
+        }
+        this.cdr.markForCheck();
+      }
+    });
+  }
+
+  selectWorkspaceTab(tab: 'download' | 'transcribe') {
+    this.activeWorkspaceTab = tab;
+    this.cdr.markForCheck();
+  }
+
+  transcribeOnline() {
+    if (!this.transcriptionEnabled()) {
+      this.toasts.error('O serviço de transcrição ainda não está disponível.');
+      return;
+    }
+    this.addDownload({
+      downloadType: 'audio',
+      codec: 'auto',
+      format: 'mp3',
+      quality: 'best',
+      autoStart: true,
+      transcribe: true,
+      transcriptionLanguage: this.transcriptionLanguage,
+    });
+  }
+
   ytdlOptionsPresetsChanged() {
     this.cookieService.set(
       'metube_ytdl_options_presets',
@@ -1093,6 +1265,8 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
       chapterTemplate: overrides.chapterTemplate ?? this.chapterTemplate,
       subtitleLanguage: overrides.subtitleLanguage ?? this.subtitleLanguage,
       subtitleMode: overrides.subtitleMode ?? this.subtitleMode,
+      transcribe: overrides.transcribe ?? this.transcribe,
+      transcriptionLanguage: overrides.transcriptionLanguage ?? this.transcriptionLanguage,
       ytdlOptionsPresets: overrides.ytdlOptionsPresets ?? [...this.ytdlOptionsPresets],
       ytdlOptionsOverrides: allowYtdlOptionsOverrides
         ? (overrides.ytdlOptionsOverrides ?? this.ytdlOptionsOverrides)
@@ -1662,7 +1836,7 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
       if (download.status === 'downloading') {
         active++;
         speed += download.speed || 0;
-      } else if (download.status === 'preparing') {
+      } else if (download.status === 'preparing' || download.status === 'transcribing') {
         active++;
       } else if (download.status === 'pending' || download.status === 'scheduled') {
         queued++;

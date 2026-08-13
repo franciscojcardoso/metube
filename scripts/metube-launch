@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+systemctl --user start metube-whisper.service metube.service
+i=0
+while [ "$i" -lt 40 ]; do
+  if curl --silent --fail http://127.0.0.1:8081/ >/dev/null 2>&1; then
+    launch_id=$(date +%s)
+    exec xdg-open "http://127.0.0.1:8081/?launch=$launch_id"
+  fi
+  sleep 0.25
+  i=$((i + 1))
+done
+
+notify-send "MeTube" "Não foi possível iniciar o aplicativo. Consulte: journalctl --user -u metube" 2>/dev/null || true
+exit 1

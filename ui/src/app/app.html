@@ -8,25 +8,25 @@
       @if (activeDownloads > 0) {
         <div class="metric">
           <fa-icon [icon]="faDownload" class="text-primary" />
-          <span>{{activeDownloads}} downloading</span>
+          <span>{{activeDownloads}} baixando</span>
         </div>
       }
       @if (queuedDownloads > 0) {
         <div class="metric">
           <fa-icon [icon]="faClock" class="text-warning" />
-          <span>{{queuedDownloads}} queued</span>
+          <span>{{queuedDownloads}} na fila</span>
         </div>
       }
       @if (completedDownloads > 0) {
         <div class="metric">
           <fa-icon [icon]="faCheck" class="text-success" />
-          <span>{{completedDownloads}} completed</span>
+          <span>{{completedDownloads}} concluídos</span>
         </div>
       }
       @if (failedDownloads > 0) {
         <div class="metric">
           <fa-icon [icon]="faTimesCircle" class="text-danger" />
-          <span>{{failedDownloads}} failed</span>
+          <span>{{failedDownloads}} com falha</span>
         </div>
       }
       @if ((totalSpeed | speed) !== '') {
@@ -86,6 +86,27 @@
 <main role="main" class="container container-xl">
   <form #f="ngForm">
     <div class="container add-url-box">
+      <div class="workspace-tabs" role="tablist" aria-label="Área de trabalho">
+        <button nz-button type="button" role="tab" class="workspace-tab"
+          [class.workspace-tab-active]="activeWorkspaceTab === 'download'"
+          [attr.aria-selected]="activeWorkspaceTab === 'download'"
+          aria-controls="download-workspace"
+          (click)="selectWorkspaceTab('download')">
+          <fa-icon [icon]="faDownload" />
+          Baixar
+        </button>
+        <button nz-button type="button" role="tab" class="workspace-tab"
+          [class.workspace-tab-active]="activeWorkspaceTab === 'transcribe'"
+          [attr.aria-selected]="activeWorkspaceTab === 'transcribe'"
+          aria-controls="transcription-workspace"
+          (click)="selectWorkspaceTab('transcribe')">
+          <fa-icon [icon]="faFileLines" />
+          Transcrever
+        </button>
+      </div>
+
+      @if (activeWorkspaceTab === 'download') {
+      <div id="download-workspace" role="tabpanel" aria-label="Baixar">
       <!-- Main URL Input with Download Button -->
       <div class="row mb-4">
         <div class="col">
@@ -93,38 +114,38 @@
             @if (addInProgress && cancelRequested) {
               <button class="btn btn-warning btn-lg px-3" type="button" disabled>
                 <span class="spinner-border spinner-border-sm me-1" role="status"></span>
-                Canceling...
+                Cancelando...
               </button>
             } @else if (addInProgress) {
               <button class="btn btn-secondary btn-lg px-3 add-progress-btn" type="button" disabled>
                 <span class="spinner-border spinner-border-sm me-2" role="status"></span>
-                Adding...
+                Adicionando...
               </button>
               <button class="btn btn-outline-danger btn-lg px-3 add-cancel-btn"
                 type="button"
                 (click)="cancelAdding()"
-                aria-label="Cancel adding URL"
-                title="Cancel adding URL">
-                <fa-icon [icon]="faTimesCircle" class="me-1" /> Cancel
+                aria-label="Cancelar adição da URL"
+                title="Cancelar adição da URL">
+                <fa-icon [icon]="faTimesCircle" class="me-1" /> Cancelar
               </button>
             } @else if (subscribeInProgress) {
               <button class="btn btn-primary btn-lg px-4" type="button" disabled>
-                Download
+                Baixar
               </button>
               <button class="btn btn-outline-secondary btn-lg px-3" type="button" disabled>
                 <span class="spinner-border spinner-border-sm me-2" role="status"></span>
-                Subscribing...
+                Inscrevendo...
               </button>
             } @else {
               <button class="btn btn-primary btn-lg px-4" type="submit"
                 (click)="addDownload()"
                 [disabled]="downloads.loading">
-                Download
+                Baixar
               </button>
               <button class="btn btn-outline-secondary btn-lg px-3" type="button"
                 (click)="addSubscription()"
                 [disabled]="downloads.loading">
-                Subscribe
+                Inscrever
               </button>
             }
           </ng-template>
@@ -135,11 +156,11 @@
               autocomplete="off"
               spellcheck="false"
               class="form-control form-control-lg"
-              placeholder="Enter video, channel, or playlist URL"
+              placeholder="Cole a URL do vídeo, canal ou playlist"
               [(ngModel)]="addUrl"
               [ngModelOptions]="{standalone: true}"
               [disabled]="addInProgress || subscribeInProgress || downloads.loading">
-            <div class="btn-group w-100" role="group" aria-label="Download or subscribe">
+            <div class="btn-group w-100" role="group" aria-label="Baixar ou inscrever">
               <ng-container [ngTemplateOutlet]="urlBarActions" />
             </div>
           </div>
@@ -150,7 +171,7 @@
               autocomplete="off"
               spellcheck="false"
               class="form-control form-control-lg"
-              placeholder="Enter video, channel, or playlist URL"
+              placeholder="Cole a URL do vídeo, canal ou playlist"
               [(ngModel)]="addUrl"
               [ngModelOptions]="{standalone: true}"
               [disabled]="addInProgress || subscribeInProgress || downloads.loading">
@@ -164,7 +185,7 @@
         @if (downloadType === 'video') {
           <div class="col-md-3">
             <div class="input-group">
-              <span class="input-group-text">Type</span>
+              <span class="input-group-text">Tipo</span>
               <select class="form-select"
                 name="downloadType"
                 [(ngModel)]="downloadType"
@@ -192,7 +213,7 @@
           </div>
           <div class="col-md-3">
             <div class="input-group">
-              <span class="input-group-text">Format</span>
+              <span class="input-group-text">Formato</span>
               <select class="form-select"
                 name="format"
                 [(ngModel)]="format"
@@ -206,7 +227,7 @@
           </div>
           <div class="col-md-3">
             <div class="input-group">
-              <span class="input-group-text">Quality</span>
+              <span class="input-group-text">Qualidade</span>
               <select class="form-select"
                 name="quality"
                 [(ngModel)]="quality"
@@ -221,7 +242,7 @@
         } @else if (downloadType === 'audio') {
           <div class="col-md-4">
             <div class="input-group">
-              <span class="input-group-text">Type</span>
+              <span class="input-group-text">Tipo</span>
               <select class="form-select"
                 name="downloadType"
                 [(ngModel)]="downloadType"
@@ -235,7 +256,7 @@
           </div>
           <div class="col-md-4">
             <div class="input-group">
-              <span class="input-group-text">Format</span>
+              <span class="input-group-text">Formato</span>
               <select class="form-select"
                 name="format"
                 [(ngModel)]="format"
@@ -249,7 +270,7 @@
           </div>
           <div class="col-md-4">
             <div class="input-group">
-              <span class="input-group-text">Quality</span>
+              <span class="input-group-text">Qualidade</span>
               <select class="form-select"
                 name="quality"
                 [(ngModel)]="quality"
@@ -265,7 +286,7 @@
           <!-- 4× col-md-3 is too tight at ~768px (long addons wrap the 4th field); 2×2 md–lg, one row lg+ -->
           <div class="col-12 col-md-6 col-lg-3">
             <div class="input-group">
-              <span class="input-group-text">Type</span>
+              <span class="input-group-text">Tipo</span>
               <select class="form-select"
                 name="downloadType"
                 [(ngModel)]="downloadType"
@@ -279,7 +300,7 @@
           </div>
           <div class="col-12 col-md-6 col-lg-3">
             <div class="input-group">
-              <span class="input-group-text help-title" ngbPopover="Subtitle output format for captions mode." triggers="click" autoClose="outside" container="body">Format</span>
+              <span class="input-group-text help-title" ngbPopover="Formato do arquivo de legenda." triggers="click" autoClose="outside" container="body">Formato</span>
               <select class="form-select"
                 name="format"
                 [(ngModel)]="format"
@@ -293,7 +314,7 @@
           </div>
           <div class="col-12 col-md-6 col-lg-3">
             <div class="input-group">
-              <span class="input-group-text help-title" ngbPopover="Subtitle language (you can type any language code)." triggers="click" autoClose="outside" container="body">Language</span>
+              <span class="input-group-text help-title" ngbPopover="Idioma da legenda (você pode digitar qualquer código)." triggers="click" autoClose="outside" container="body">Idioma</span>
               <input class="form-control"
                 type="text"
                 list="subtitleLanguageOptions"
@@ -311,7 +332,7 @@
           </div>
           <div class="col-12 col-md-6 col-lg-3">
             <div class="input-group">
-              <span class="input-group-text help-title" ngbPopover="Choose manual, auto, or fallback preference for captions mode." triggers="click" autoClose="outside" container="body">Subtitle Source</span>
+              <span class="input-group-text help-title" ngbPopover="Escolha a origem preferida das legendas." triggers="click" autoClose="outside" container="body">Origem da legenda</span>
               <select class="form-select"
                 name="subtitleMode"
                 [(ngModel)]="subtitleMode"
@@ -326,7 +347,7 @@
         } @else {
           <div class="col-md-6">
             <div class="input-group">
-              <span class="input-group-text">Type</span>
+              <span class="input-group-text">Tipo</span>
               <select class="form-select"
                 name="downloadType"
                 [(ngModel)]="downloadType"
@@ -340,7 +361,7 @@
           </div>
           <div class="col-md-6">
             <div class="input-group">
-              <span class="input-group-text">Format</span>
+              <span class="input-group-text">Formato</span>
               <input class="form-control" value="JPG" disabled>
             </div>
           </div>
@@ -354,7 +375,7 @@
             (click)="toggleAdvanced()"
             [attr.aria-expanded]="isAdvancedOpen"
             aria-controls="advancedOptions">
-            Advanced Options
+            Opções avançadas
             <fa-icon
               [icon]="isAdvancedOpen ? faChevronDown : faChevronRight"
               class="ms-1" />
@@ -368,14 +389,34 @@
           <div class="collapse show" id="advancedOptions" [ngbCollapse]="!isAdvancedOpen">
             <div class="pt-1 pb-2">
               <!-- Output -->
-              <div class="settings-section-label">Output</div>
+              <div class="settings-section-label">Saída</div>
               <div class="row g-3">
+                @if (downloads.configuration['DESKTOP_MODE']) {
+                <div class="col-12">
+                  <label for="desktop-download-dir" class="form-label">Pasta principal de downloads</label>
+                  <div class="input-group">
+                    <input id="desktop-download-dir" type="text" class="form-control"
+                      name="desktopDownloadDir" [(ngModel)]="desktopDownloadDir"
+                      placeholder="/home/seu-usuario/Downloads"
+                      [disabled]="desktopSettingsSaving || activeDownloads > 0">
+                    <button type="button" class="btn btn-outline-primary"
+                      (click)="saveDesktopSettings()"
+                      [disabled]="desktopSettingsSaving || activeDownloads > 0">
+                      @if (desktopSettingsSaving) {
+                        <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                      }
+                      Salvar pasta
+                    </button>
+                  </div>
+                  <div class="form-text">O aplicativo reiniciará após salvar. Aguarde os downloads ativos terminarem.</div>
+                </div>
+                }
                 <div class="col-md-6">
                   <div class="input-group">
-                    <span class="input-group-text help-title" ngbPopover="Type to filter existing folders, or enter a new folder name." triggers="click" autoClose="outside" container="body">Download Folder</span>
+                    <span class="input-group-text help-title" ngbPopover="Digite para filtrar pastas existentes ou informe uma nova pasta." triggers="click" autoClose="outside" container="body">Subpasta</span>
                     <input type="text"
                       class="form-control"
-                      placeholder="Default"
+                      placeholder="Padrão"
                       name="folder"
                       [(ngModel)]="folder"
                       [ngbTypeahead]="searchFolder"
@@ -447,8 +488,36 @@
               </div>
 
               <!-- Behavior -->
-              <div class="settings-section-label">Behavior</div>
+              <div class="settings-section-label">Comportamento</div>
               <div class="row g-3">
+                @if (downloadType === 'video' || downloadType === 'audio') {
+                <div class="col-md-6">
+                  <div class="form-check form-switch pt-2">
+                    <input class="form-check-input" type="checkbox" role="switch" id="checkbox-transcribe"
+                      name="transcribe" [(ngModel)]="transcribe" (change)="transcribeChanged()"
+                      [disabled]="!transcriptionEnabled() || addInProgress || subscribeInProgress || downloads.loading">
+                    <label class="form-check-label" for="checkbox-transcribe">
+                      Transcrever e escolher a melhor legenda
+                    </label>
+                    @if (!transcriptionEnabled()) {
+                      <div class="form-text">Configure TRANSCRIPTION_URL no servidor.</div>
+                    }
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <div class="input-group">
+                    <span class="input-group-text">Idioma da transcrição</span>
+                    <select class="form-select" name="transcriptionLanguage"
+                      [(ngModel)]="transcriptionLanguage" (change)="transcriptionLanguageChanged()"
+                      [disabled]="!transcribe || !transcriptionEnabled() || addInProgress || subscribeInProgress || downloads.loading">
+                      <option value="auto">Detectar automaticamente</option>
+                      @for (language of subtitleLanguages; track language.id) {
+                        <option [value]="language.id">{{language.text}}</option>
+                      }
+                    </select>
+                  </div>
+                </div>
+                }
                 <div class="col-md-6">
                   <div class="input-group">
                     <span class="input-group-text help-title" ngbPopover="Automatically start downloads when added." triggers="click" autoClose="outside" container="body">Auto Start</span>
@@ -457,8 +526,8 @@
                       [(ngModel)]="autoStart"
                       (change)="autoStartChanged()"
                       [disabled]="addInProgress || subscribeInProgress || downloads.loading">
-                      <option [ngValue]="true">Yes</option>
-                      <option [ngValue]="false">No</option>
+                      <option [ngValue]="true">Sim</option>
+                      <option [ngValue]="false">Não</option>
                     </select>
                   </div>
                 </div>
@@ -551,7 +620,7 @@
               </div>
 
               <!-- Tools -->
-              <div class="settings-section-label">Tools</div>
+              <div class="settings-section-label">Ferramentas</div>
               <div class="row g-3">
                 <div class="col-md-4">
                   <div class="action-group-label help-title" ngbPopover="Upload a cookies.txt file from your browser to authenticate restricted or private downloads." triggers="click" autoClose="outside" container="body">Cookies</div>
@@ -589,14 +658,14 @@
                   </div>
                 </div>
                 <div class="col-md-8">
-                  <div class="action-group-label">Bulk Actions</div>
+                  <div class="action-group-label">Ações em lote</div>
                   <div class="row g-2">
                     <div class="col-4">
                       <button type="button"
                         class="btn btn-secondary w-100"
                         (click)="openBatchImportModal()">
                         <fa-icon [icon]="faFileImport" class="me-2" />
-                        Import URLs
+                        Importar URLs
                       </button>
                     </div>
                     <div class="col-4">
@@ -604,7 +673,7 @@
                         class="btn btn-secondary w-100"
                         (click)="exportBatchUrls('all')">
                         <fa-icon [icon]="faFileExport" class="me-2" />
-                        Export URLs
+                        Exportar URLs
                       </button>
                     </div>
                     <div class="col-4">
@@ -612,7 +681,7 @@
                         class="btn btn-secondary w-100"
                         (click)="copyBatchUrls('all')">
                         <fa-icon [icon]="faCopy" class="me-2" />
-                        Copy URLs
+                        Copiar URLs
                       </button>
                     </div>
                   </div>
@@ -622,6 +691,116 @@
           </div>
         </div>
       </div>
+      </div>
+      }
+
+      @if (activeWorkspaceTab === 'transcribe') {
+      <div id="transcription-workspace" role="tabpanel" aria-label="Transcrever"
+        class="transcription-workspace">
+        <div class="transcription-heading">
+          <span class="eyebrow">Whisper local</span>
+          <h1>Transforme áudio em texto</h1>
+          <p>Use um link ou escolha um arquivo deste computador. O resultado é salvo automaticamente na pasta de downloads.</p>
+          <nz-alert nzType="success" nzShowIcon
+            nzMessage="Processamento privado e local"
+            nzDescription="Nenhum áudio é enviado para uma API paga e não há consumo de tokens."></nz-alert>
+        </div>
+
+        <nz-card class="transcription-card mb-4" nzTitle="Vídeo ou áudio online">
+          <label class="form-label" for="transcription-url">URL do conteúdo</label>
+          <div class="transcription-action-row">
+            <input id="transcription-url" nz-input nzSize="large" type="url" autocomplete="off" spellcheck="false"
+              name="transcriptionUrl" [(ngModel)]="addUrl"
+              placeholder="https://www.youtube.com/watch?v=..."
+              [disabled]="addInProgress || downloads.loading">
+            <button nz-button nzType="primary" nzSize="large" type="button" (click)="transcribeOnline()"
+              [nzLoading]="addInProgress"
+              [disabled]="!addUrl || !transcriptionEnabled() || downloads.loading">
+              Transcrever URL
+            </button>
+          </div>
+          <div class="form-text mt-2">Compatível com YouTube e todos os sites suportados pelo yt-dlp.</div>
+        </nz-card>
+
+        <nz-card class="transcription-card mb-4" nzTitle="Arquivo deste computador">
+          <p class="text-body-secondary">Escolha um áudio ou vídeo no navegador de arquivos do Linux.</p>
+          <div class="file-picker-panel">
+            <div class="file-picker-icon" aria-hidden="true"><fa-icon [icon]="faFileAudio" /></div>
+            <div class="file-picker-copy">
+              <strong>{{ selectedTranscriptionFile?.name || 'Escolha o arquivo que deseja transcrever' }}</strong>
+              <span>MP3, MP4, WAV, M4A, WebM, OGG, FLAC, MOV, MKV, AAC ou OPUS</span>
+            </div>
+            <label for="transcription-file" class="ant-btn ant-btn-default ant-btn-lg file-picker-button"
+              [class.ant-btn-disabled]="localTranscriptionInProgress">
+              <fa-icon [icon]="faFolderOpen" />
+              Abrir navegador de arquivos
+            </label>
+            <input id="transcription-file" class="form-control file-picker-native" type="file"
+              accept="audio/*,video/*,.mp3,.mp4,.m4a,.wav,.webm,.ogg,.flac,.mov,.mkv,.aac,.opus"
+              [disabled]="localTranscriptionInProgress"
+              (change)="onTranscriptionFileSelect($event)">
+          </div>
+          <div class="file-actions">
+            @if (selectedTranscriptionFile) {
+              <button nz-button nzSize="large" type="button" (click)="clearTranscriptionFile()"
+                [disabled]="localTranscriptionInProgress">Remover</button>
+            }
+            <button nz-button nzType="primary" nzSize="large" type="button" (click)="transcribeSelectedFile()"
+              [nzLoading]="localTranscriptionInProgress"
+              [disabled]="!selectedTranscriptionFile || !transcriptionEnabled()">
+              Transcrever arquivo
+            </button>
+          </div>
+          @if (localTranscriptionInProgress) {
+            <div class="transcription-progress" role="status" aria-live="polite">
+              <div class="transcription-progress-label">
+                @if (transcriptionProgressPhase === 'uploading') {
+                  <strong>Enviando arquivo</strong>
+                  <span>{{ transcriptionUploadProgress }}%</span>
+                } @else {
+                  <strong>Transcrevendo áudio</strong>
+                  <span>O tempo depende da duração do arquivo</span>
+                }
+              </div>
+              <div class="progress" [class.progress-indeterminate]="transcriptionProgressPhase === 'transcribing'"
+                [attr.aria-label]="transcriptionProgressPhase === 'uploading' ? 'Progresso do envio' : 'Transcrição em andamento'"
+                [attr.aria-valuenow]="transcriptionProgressPhase === 'uploading' ? transcriptionUploadProgress : null"
+                aria-valuemin="0" aria-valuemax="100">
+                <div class="progress-bar" [style.width.%]="transcriptionProgressPhase === 'uploading' ? transcriptionUploadProgress : 35"></div>
+              </div>
+            </div>
+          }
+          @if (transcriptionResultStatus) {
+            <nz-alert class="transcription-result" nzShowIcon
+              [nzType]="transcriptionResultStatus"
+              [nzMessage]="transcriptionResultTitle"
+              [nzDescription]="transcriptionResultMessage"
+              nzCloseable
+              (nzOnClose)="clearTranscriptionResult()">
+            </nz-alert>
+          }
+        </nz-card>
+
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label" for="workspace-transcription-language">Idioma</label>
+            <nz-select class="w-100" nzSize="large" id="workspace-transcription-language"
+              name="workspaceTranscriptionLanguage" [(ngModel)]="transcriptionLanguage"
+              (ngModelChange)="transcriptionLanguageChanged()">
+              <nz-option nzValue="auto" nzLabel="Detectar automaticamente"></nz-option>
+              @for (language of subtitleLanguages; track language.id) {
+                <nz-option [nzValue]="language.id" [nzLabel]="language.text"></nz-option>
+              }
+            </nz-select>
+          </div>
+          <div class="col-md-6 d-flex align-items-end">
+            <div class="transcription-output-note">
+              A transcrição será salva em Markdown com metadados YAML.
+            </div>
+          </div>
+        </div>
+      </div>
+      }
     </div>
   </form>
 
@@ -634,12 +813,12 @@
     <div class="modal-dialog" role="document">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 id="batch-import-modal-title" class="modal-title">Batch Import URLs</h5>
+          <h5 id="batch-import-modal-title" class="modal-title">Importar URLs em lote</h5>
           <button type="button" class="btn-close" aria-label="Close" (click)="closeBatchImportModal()"></button>
         </div>
         <div class="modal-body">
           <textarea id="batch-import-textarea" [(ngModel)]="batchImportText" class="form-control" rows="6"
-          placeholder="Paste one video URL per line"></textarea>
+          placeholder="Cole uma URL de vídeo por linha"></textarea>
           <div class="mt-2">
             @if (batchImportStatus) {
               <small>{{ batchImportStatus }}</small>
@@ -662,25 +841,26 @@
         <div class="modal-footer">
           @if (importInProgress) {
             <button type="button" class="btn btn-danger me-auto" (click)="cancelBatchImport()">
-              Cancel Import
+              Cancelar importação
             </button>
           }
-          <button type="button" class="btn btn-secondary" (click)="closeBatchImportModal()">Close</button>
+          <button type="button" class="btn btn-secondary" (click)="closeBatchImportModal()">Fechar</button>
           <button type="button" class="btn btn-primary" (click)="startBatchImport()" [disabled]="importInProgress">
-            Import URLs
+            Importar URLs
           </button>
         </div>
       </div>
     </div>
   </div>
 
-
+  @if (activeWorkspaceTab === 'download') {
+  <section class="download-dashboard" aria-label="Downloads e inscrições">
   @if (downloads.loading) {
     <div class="alert alert-info" role="alert">
-      Connecting to server...
+      Conectando ao servidor...
     </div>
   }
-  <div class="metube-section-header">Downloading</div>
+  <div class="metube-section-header">Baixando</div>
   <div class="px-2 py-3 border-bottom">
     <button type="button" class="btn btn-link text-decoration-none px-0 me-4" disabled #queueDelSelected (click)="delSelectedDownloads('queue')"><fa-icon [icon]="faTrashAlt" />&nbsp; Cancel selected</button>
     <button type="button" class="btn btn-link text-decoration-none px-0 me-4" disabled #queueDownloadSelected (click)="startSelectedDownloads('queue')"><fa-icon [icon]="faDownload" />&nbsp; Download selected</button>
@@ -692,8 +872,8 @@
           <th scope="col" style="width: 1rem;">
             <app-select-all-checkbox #queueMasterCheckboxRef [id]="'queue'" [list]="downloads.queue" (changed)="queueSelectionChanged($event)" />
           </th>
-          <th scope="col">Video</th>
-          <th scope="col" style="width: 8rem;">Speed</th>
+          <th scope="col">Vídeo</th>
+          <th scope="col" style="width: 8rem;">Velocidade</th>
           <th scope="col" style="width: 7rem;">ETA</th>
           <th scope="col" style="width: 6rem;"></th>
         </tr>
@@ -715,10 +895,15 @@
                 @if (download.value.status === 'scheduled') {
                   <span class="badge bg-warning text-dark">
                     <fa-icon [icon]="faClock" />
-                    Waiting for stream
+                    Aguardando transmissão
                     @if (liveCountdownSeconds(download.value); as secs) {
-                      - starts in {{ secs | eta }}
+                      - começa em {{ secs | eta }}
                     }
+                  </span>
+                } @else if (download.value.status === 'transcribing') {
+                  <span class="badge bg-info text-dark">
+                    <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                    Transcrevendo e comparando legendas
                   </span>
                 } @else {
                   <ngb-progressbar height="1.5rem" [showValue]="download.value.status !== 'preparing'" [striped]="download.value.status === 'preparing'" [animated]="download.value.status === 'preparing'" type="success"
@@ -743,7 +928,7 @@
     </table>
   </div>
 
-  <div class="metube-section-header">Completed</div>
+  <div class="metube-section-header">Concluídos</div>
   <div class="px-2 py-3 border-bottom">
     <button type="button" class="btn btn-link text-decoration-none px-0 me-4" (click)="toggleSortOrder()" ngbTooltip="{{ sortAscending ? 'Oldest first' : 'Newest first' }}"><fa-icon [icon]="sortAscending ? faSortAmountUp : faSortAmountDown" />&nbsp; {{ sortAscending ? 'Oldest first' : 'Newest first' }}</button>
     <button type="button" class="btn btn-link text-decoration-none px-0 me-4" disabled #doneDelSelected (click)="delSelectedDownloads('done')"><fa-icon [icon]="faTrashAlt" />&nbsp; Clear selected</button>
@@ -759,12 +944,12 @@
           <th scope="col" style="width: 1rem;">
             <app-select-all-checkbox #doneMasterCheckboxRef [id]="'done'" [list]="downloads.done" (changed)="doneSelectionChanged($event)" />
           </th>
-          <th scope="col">Video</th>
-          <th scope="col">Type</th>
-          <th scope="col">Quality</th>
-          <th scope="col">Codec / Format</th>
-          <th scope="col">File Size</th>
-          <th scope="col">Downloaded</th>
+          <th scope="col">Vídeo</th>
+          <th scope="col">Tipo</th>
+          <th scope="col">Qualidade</th>
+          <th scope="col">Codec / Formato</th>
+          <th scope="col">Tamanho</th>
+          <th scope="col">Baixado em</th>
           <th scope="col" style="width: 8rem;"></th>
         </tr>
       </thead>
@@ -804,6 +989,18 @@
                   <span>{{entry[1].title}}</span>
                 }
               }</span>
+              @if (entry[1].transcription_result?.canonical) {
+                <a class="badge bg-info text-dark text-decoration-none ms-2"
+                  [href]="buildChapterDownloadLink(entry[1], entry[1].transcription_result!.markdown || entry[1].transcription_result!.canonical)"
+                  target="_blank">
+                  Transcrição {{ entry[1].transcription_result.winner === 'source' ? '(legenda original)' : '(Whisper)' }}
+                </a>
+              }
+              @if (entry[1].transcription_error) {
+                <span class="badge bg-warning text-dark ms-2" [ngbTooltip]="entry[1].transcription_error">
+                  Falha na transcrição
+                </span>
+              }
               @if (entry[1].status === 'error' && isErrorExpanded(entry[0])) {
                 <div class="alert alert-danger py-2 px-3 mt-2 mb-0 small" style="border-left: 4px solid var(--bs-danger);">
                   <div class="d-flex justify-content-between align-items-start">
@@ -898,7 +1095,7 @@
     </table>
   </div>
 
-  <div class="metube-section-header">Subscriptions</div>
+  <div class="metube-section-header">Inscrições</div>
   <div class="px-2 py-3 border-bottom">
     @if (checkingAllSubscriptions) {
       <button type="button" class="btn btn-link text-decoration-none px-0 me-4" disabled>
@@ -1071,6 +1268,8 @@
       </tbody>
     </table>
   </div>
+  </section>
+  }
 </main><!-- /.container -->
 
 <footer class="footer navbar-dark bg-dark py-3 mt-5">
