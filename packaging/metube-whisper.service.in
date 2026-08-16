@@ -1,0 +1,17 @@
+[Unit]
+Description=MeTube - transcrição local Whisper
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/docker rm -f metube-whisper
+ExecStart=/usr/bin/docker run --rm --name metube-whisper --pull=never -p 127.0.0.1:9000:9000 -e WHISPER_MODEL=small -e WHISPER_LANGUAGE=auto -e WHISPER_THREADS=4 -e WHISPER_BEAM=1 -e WHISPER_API_KEY=metube-local-whisper -e WHISPER_DISABLE_USAGE_COUNTS=1 -v metube-whisper-data:/var/lib/whisper hwdsl2/whisper-server
+ExecStop=/usr/bin/docker stop -t 20 metube-whisper
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=0
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

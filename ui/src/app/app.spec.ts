@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpEventType, HttpResponse } from '@angular/common/http';
 import { Subject, of } from 'rxjs';
 import { App } from './app';
 import { DownloadsService } from './services/downloads.service';
@@ -20,6 +20,7 @@ class DownloadsServiceStub {
   ytdlOptionsChanged = new Subject<Record<string, unknown>>();
   updated = new Subject<void>();
   retryCalls: string[] = [];
+  transcriptionEvents = new Subject<unknown>();
 
   getCookieStatus() {
     return of({ status: 'ok', has_cookies: false });
@@ -60,6 +61,10 @@ class DownloadsServiceStub {
 
   uploadCookies() {
     return of({ status: 'ok' });
+  }
+
+  transcribeUpload() {
+    return this.transcriptionEvents.asObservable();
   }
 
   deleteCookies() {
@@ -122,6 +127,8 @@ describe('App', () => {
         onchange: null,
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
         dispatchEvent: vi.fn(),
       })),
     });
@@ -225,8 +232,8 @@ describe('App', () => {
     fixture.detectChanges();
 
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.textContent).toContain('Waiting for stream');
-    expect(root.textContent).toContain('starts in');
+    expect(root.textContent).toContain('Aguardando transmissão');
+    expect(root.textContent).toContain('começa em');
   });
 
   it('includes titleRegex in subscribe payload', () => {
@@ -350,5 +357,109 @@ describe('App', () => {
     expect(app.editingNameId).toBe('sub1');
     expect(errorSpy).toHaveBeenCalledWith('Subscription name must not be empty');
     errorSpy.mockRestore();
+  });
+
+  it('shows an enabled native file picker when the transcription tab is clicked', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    fixture.detectChanges();
+
+    const root = fixture.nativeElement as HTMLElement;
+    const transcriptionTab = [...root.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+      .find((tab) => tab.textContent?.includes('Transcrever'));
+    expect(transcriptionTab).not.toBeUndefined();
+    transcriptionTab?.click();
+    fixture.detectChanges();
+
+    const workspace = root.querySelector('.transcription-workspace');
+    const fileInput = workspace?.querySelector<HTMLInputElement>('input[type="file"]');
+    const pickerLabel = workspace?.querySelector<HTMLLabelElement>('label[for="transcription-file"]');
+    expect(app.activeWorkspaceTab).toBe('transcribe');
+    expect(workspace).not.toBeNull();
+    expect(root.querySelector('#download-workspace')).toBeNull();
+    expect(workspace?.textContent).toContain('Arquivo deste computador');
+    expect(pickerLabel?.textContent).toContain('Abrir navegador de arquivos');
+    expect(fileInput).not.toBeNull();
+    expect(fileInput?.disabled).toBe(false);
+    expect(fileInput?.id).toBe('transcription-file');
+    expect(fileInput?.accept).toContain('video/*');
+
+    const media = new File(['audio'], 'entrevista.mp3', { type: 'audio/mpeg' });
+    Object.defineProperty(fileInput, 'files', {
+      configurable: true,
+      value: { 0: media, length: 1, item: (index: number) => index === 0 ? media : null },
+    });
+    fileInput?.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+
+    expect(app.selectedTranscriptionFile).toBe(media);
+    expect(workspace?.textContent).toContain('entrevista.mp3');
+    expect(workspace?.textContent).toContain('Transcrever arquivo');
+  });
+
+  it('shows measured upload progress followed by a labelled transcription phase', () => {
+    downloads.configuration['TRANSCRIPTION_ENABLED'] = true;
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    app.activeWorkspaceTab = 'transcribe';
+    app.selectedTranscriptionFile = new File(['audio'], 'entrevista.mp3', { type: 'audio/mpeg' });
+    fixture.detectChanges();
+
+    app.transcribeSelectedFile();
+    downloads.transcriptionEvents.next({ type: HttpEventType.UploadProgress, loaded: 40, total: 100 });
+    fixture.detectChanges();
+
+    let progress = fixture.nativeElement.querySelector('.transcription-progress') as HTMLElement;
+    expect(progress.textContent).toContain('Enviando arquivo');
+    expect(progress.textContent).toContain('40%');
+
+    downloads.transcriptionEvents.next({ type: HttpEventType.UploadProgress, loaded: 100, total: 100 });
+    fixture.detectChanges();
+    progress = fixture.nativeElement.querySelector('.transcription-progress') as HTMLElement;
+    expect(progress.textContent).toContain('Transcrevendo áudio');
+    expect(progress.querySelector('.progress')?.classList.contains('progress-indeterminate')).toBe(true);
+
+    downloads.transcriptionEvents.next(new HttpResponse({
+      body: { status: 'ok', result: { markdown: '/downloads/entrevista.md' } },
+    }));
+    downloads.transcriptionEvents.complete();
+    fixture.detectChanges();
+    expect(app.selectedTranscriptionFile).toBeNull();
+    expect(app.localTranscriptionInProgress).toBe(false);
+    const result = fixture.nativeElement.querySelector('.transcription-result') as HTMLElement;
+    expect(result.textContent).toContain('Transcrição concluída');
+    expect(result.textContent).toContain('/downloads/entrevista.md');
+  });
+
+  it('keeps a visible error message after transcription fails', () => {
+    downloads.configuration['TRANSCRIPTION_ENABLED'] = true;
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    app.activeWorkspaceTab = 'transcribe';
+    app.selectedTranscriptionFile = new File(['audio'], 'falha.mp3', { type: 'audio/mpeg' });
+    fixture.detectChanges();
+
+    app.transcribeSelectedFile();
+    downloads.transcriptionEvents.next(new HttpResponse({
+      body: { status: 'error', msg: 'O servidor de transcrição não respondeu.' },
+    }));
+    downloads.transcriptionEvents.complete();
+    fixture.detectChanges();
+
+    const result = fixture.nativeElement.querySelector('.transcription-result') as HTMLElement;
+    expect(result.textContent).toContain('Não foi possível transcrever o arquivo');
+    expect(result.textContent).toContain('O servidor de transcrição não respondeu.');
+    expect(app.selectedTranscriptionFile?.name).toBe('falha.mp3');
+  });
+
+  it('describes Markdown as the only transcription output', () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.componentInstance.activeWorkspaceTab = 'transcribe';
+    fixture.detectChanges();
+    const workspace = fixture.nativeElement.querySelector('.transcription-workspace') as HTMLElement;
+    expect(workspace.textContent).toContain('Markdown com metadados YAML');
+    expect(workspace.textContent).not.toContain('SRT');
+    expect(workspace.textContent).not.toContain('TXT');
+    expect(workspace.textContent).not.toContain('JSON');
   });
 });

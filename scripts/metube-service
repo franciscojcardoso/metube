@@ -1,0 +1,31 @@
+#!/bin/sh
+set -eu
+
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
+data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
+desktop_config="$config_home/metube/settings.json"
+default_download_dir="$HOME/Downloads/MeTube"
+
+mkdir -p "$config_home/metube" "$data_home/metube" "$default_download_dir"
+export METUBE_DESKTOP_CONFIG="$desktop_config"
+export DOWNLOAD_DIR="${DOWNLOAD_DIR:-$default_download_dir}"
+export STATE_DIR="${STATE_DIR:-$data_home/metube}"
+export BASE_DIR="$project_dir"
+export HOST="127.0.0.1"
+export PORT="${PORT:-8081}"
+export TRANSCRIPTION_URL="${TRANSCRIPTION_URL:-http://127.0.0.1:9000/v1/audio/transcriptions}"
+export TRANSCRIPTION_API_KEY="${TRANSCRIPTION_API_KEY:-metube-local-whisper}"
+export TRANSCRIPTION_MODEL="${TRANSCRIPTION_MODEL:-small}"
+export TRANSCRIPTION_TIMEOUT="${TRANSCRIPTION_TIMEOUT:-14400}"
+
+while true; do
+  set +e
+  "$project_dir/.venv/bin/python" "$project_dir/app/main.py"
+  status=$?
+  set -e
+  case "$status" in
+    42|43) continue ;;
+    *) exit "$status" ;;
+  esac
+done

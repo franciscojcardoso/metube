@@ -17,11 +17,12 @@ import json
 import pathlib
 import re
 import time
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from watchfiles import DefaultFilter, Change, awatch
 
 import bg_tasks
-from ytdl import DownloadQueueNotifier, DownloadQueue, Download
+from ytdl import DownloadQueueNotifier, DownloadQueue, Download, _sanitize_path_component
 from subscriptions import SubscriptionManager, SubscriptionNotifier, SubscriptionInfo, coerce_optional_bool
 from yt_dlp.version import __version__ as yt_dlp_version
 
@@ -95,13 +96,37 @@ class Config:
         'LOGLEVEL': 'INFO',
         'ENABLE_ACCESSLOG': 'false',
         'YTDL_NIGHTLY_UPDATE_TIME': '',
+        'TRANSCRIPTION_URL': '',
+        'TRANSCRIPTION_API_KEY': '',
+        'TRANSCRIPTION_MODEL': 'whisper-1',
+        'TRANSCRIPTION_TIMEOUT': '7200',
     }
 
     _BOOLEAN = ('DOWNLOAD_DIRS_INDEXABLE', 'CUSTOM_DIRS', 'CREATE_CUSTOM_DIRS', 'DELETE_FILE_ON_TRASHCAN', 'HTTPS', 'ENABLE_ACCESSLOG', 'ALLOW_YTDL_OPTIONS_OVERRIDES', 'ALLOW_PRIVATE_ADDRESSES')
 
     def __init__(self):
+        desktop_config_path = os.environ.get('METUBE_DESKTOP_CONFIG', '')
+        desktop_config = {}
+        if desktop_config_path:
+            try:
+                with open(desktop_config_path, encoding='utf-8') as desktop_config_file:
+                    desktop_config = json.load(desktop_config_file)
+                if not isinstance(desktop_config, dict):
+                    raise ValueError('desktop config must be an object')
+            except FileNotFoundError:
+                pass
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                log.warning('Could not load desktop configuration: %s', exc)
+
         for k, v in self._DEFAULTS.items():
             setattr(self, k, os.environ.get(k, v))
+
+        configured_download_dir = desktop_config.get('download_dir')
+        if desktop_config_path and isinstance(configured_download_dir, str):
+            self.DOWNLOAD_DIR = configured_download_dir
+        if desktop_config_path:
+            self.AUDIO_DOWNLOAD_DIR = self.DOWNLOAD_DIR
+            self.TEMP_DIR = self.DOWNLOAD_DIR
 
         for k, v in self.__dict__.items():
             if isinstance(v, str) and v.startswith('%%'):
@@ -147,6 +172,8 @@ class Config:
         self._validate_int('SUBSCRIPTION_DEFAULT_CHECK_INTERVAL', minimum=1)
         self._validate_int('SUBSCRIPTION_SCAN_PLAYLIST_END', minimum=1)
         self._validate_int('SUBSCRIPTION_MAX_SEEN_IDS', minimum=1)
+        self._validate_int('TRANSCRIPTION_TIMEOUT', minimum=1)
+        self.TRANSCRIPTION_ENABLED = bool(self.TRANSCRIPTION_URL)
 
         self._runtime_overrides = {}
 
@@ -193,6 +220,7 @@ class Config:
         'DEFAULT_OPTION_PLAYLIST_ITEM_LIMIT',
         'SUBSCRIPTION_DEFAULT_CHECK_INTERVAL',
         'ALLOW_YTDL_OPTIONS_OVERRIDES',
+        'TRANSCRIPTION_ENABLED',
     )
 
     def frontend_safe(self) -> dict:
@@ -201,7 +229,11 @@ class Config:
         Sensitive or server-only keys (YTDL_OPTIONS, file-system paths, TLS
         settings, etc.) are intentionally excluded.
         """
-        return {k: getattr(self, k) for k in self._FRONTEND_KEYS}
+        result = {k: getattr(self, k) for k in self._FRONTEND_KEYS}
+        if os.environ.get('METUBE_DESKTOP_CONFIG'):
+            result['DESKTOP_MODE'] = True
+            result['DESKTOP_DOWNLOAD_DIR'] = self.DOWNLOAD_DIR
+        return result
 
     def load_ytdl_options(self) -> tuple[bool, str]:
         try:
@@ -714,6 +746,8 @@ def parse_download_options(post: dict) -> dict:
     chapter_template = post.get('chapter_template')
     subtitle_language = post.get('subtitle_language')
     subtitle_mode = post.get('subtitle_mode')
+    transcribe = post.get('transcribe')
+    transcription_language = post.get('transcription_language')
     ytdl_options_overrides = post.get('ytdl_options_overrides')
 
     if custom_name_prefix is None:
@@ -730,12 +764,17 @@ def parse_download_options(post: dict) -> dict:
         subtitle_language = 'en'
     if subtitle_mode is None:
         subtitle_mode = 'prefer_manual'
+    if transcribe is None:
+        transcribe = False
+    if transcription_language is None:
+        transcription_language = 'auto'
     download_type = str(download_type).strip().lower()
     codec = str(codec or 'auto').strip().lower()
     format = str(format or '').strip().lower()
     quality = str(quality).strip().lower()
     subtitle_language = str(subtitle_language).strip()
     subtitle_mode = str(subtitle_mode).strip()
+    transcription_language = str(transcription_language).strip()
     ytdl_options_presets = _parse_ytdl_options_presets(post)
     ytdl_options_overrides = _parse_ytdl_options_overrides(
         ytdl_options_overrides,
@@ -746,6 +785,14 @@ def parse_download_options(post: dict) -> dict:
         raise web.HTTPBadRequest(reason='subtitle_language must match pattern [A-Za-z0-9-] and be at most 35 characters')
     if subtitle_mode not in VALID_SUBTITLE_MODES:
         raise web.HTTPBadRequest(reason=f'subtitle_mode must be one of {sorted(VALID_SUBTITLE_MODES)}')
+    if not isinstance(transcribe, bool):
+        raise web.HTTPBadRequest(reason='transcribe must be a boolean')
+    if transcribe and not config.TRANSCRIPTION_ENABLED:
+        raise web.HTTPBadRequest(reason='transcription is not configured on this server')
+    if transcription_language != 'auto' and not SUBTITLE_LANGUAGE_RE.fullmatch(transcription_language):
+        raise web.HTTPBadRequest(reason='transcription_language must be auto or a language code')
+    if transcribe and download_type not in ('video', 'audio'):
+        raise web.HTTPBadRequest(reason='transcription is only supported for video and audio downloads')
     for preset_name in ytdl_options_presets:
         if preset_name not in config.YTDL_OPTIONS_PRESETS:
             raise web.HTTPBadRequest(reason='ytdl_options_presets must only contain configured preset names')
@@ -834,6 +881,8 @@ def parse_download_options(post: dict) -> dict:
         'chapter_template': chapter_template,
         'subtitle_language': subtitle_language,
         'subtitle_mode': subtitle_mode,
+        'transcribe': transcribe,
+        'transcription_language': transcription_language,
         'ytdl_options_presets': ytdl_options_presets,
         'ytdl_options_overrides': ytdl_options_overrides,
         'clip_start': clip_start,
@@ -876,6 +925,8 @@ async def add(request):
         o['ytdl_options_overrides'],
         o['clip_start'],
         o['clip_end'],
+        o['transcribe'],
+        o['transcription_language'],
     )
     return web.Response(text=serializer.encode(status))
 
@@ -886,6 +937,106 @@ async def presets(request):
         text=serializer.encode({'presets': sorted(config.YTDL_OPTIONS_PRESETS.keys())}),
         content_type='application/json',
     )
+
+
+@routes.post(config.URL_PREFIX + 'transcribe-local')
+async def transcribe_local(request):
+    """Transcribe an existing media file confined to DOWNLOAD_DIR."""
+    if dqueue.transcription is None:
+        raise web.HTTPServiceUnavailable(reason='transcription is not configured')
+    post = await _read_json_request(request)
+    requested_path = post.get('path') if isinstance(post, dict) else None
+    language = str(post.get('language', 'auto')).strip() if isinstance(post, dict) else 'auto'
+    if not isinstance(requested_path, str) or not requested_path.strip():
+        raise web.HTTPBadRequest(reason='path is required')
+    if language != 'auto' and not SUBTITLE_LANGUAGE_RE.fullmatch(language):
+        raise web.HTTPBadRequest(reason='language must be auto or a language code')
+    root = os.path.realpath(config.DOWNLOAD_DIR)
+    candidate = os.path.realpath(os.path.expanduser(requested_path.strip()))
+    if not os.path.isabs(requested_path.strip()):
+        candidate = os.path.realpath(os.path.join(root, requested_path.strip()))
+    if os.path.commonpath((root, candidate)) != root:
+        raise web.HTTPForbidden(reason='path must be inside DOWNLOAD_DIR')
+    if not os.path.isfile(candidate):
+        raise web.HTTPNotFound(reason='media file was not found')
+    info = SimpleNamespace(
+        filename=os.path.relpath(candidate, root),
+        subtitle_files=[],
+        entry={},
+        transcription_language=language,
+    )
+    try:
+        async with dqueue.transcription_semaphore:
+            result = await dqueue.transcription.transcribe(info)
+    except Exception as exc:
+        log.warning('Local transcription failed for %s: %s', candidate, exc)
+        raise web.HTTPBadGateway(reason=str(exc)) from exc
+    return web.json_response({'status': 'ok', 'result': result})
+
+
+@routes.post(config.URL_PREFIX + 'transcribe-upload')
+async def transcribe_upload(request):
+    """Save a browser-selected media file in DOWNLOAD_DIR, then transcribe it."""
+    if dqueue.transcription is None:
+        raise web.HTTPServiceUnavailable(reason='transcription is not configured')
+    reader = await request.multipart()
+    upload = None
+    language = 'auto'
+    while part := await reader.next():
+        if part.name == 'language':
+            language = (await part.text()).strip()
+        elif part.name == 'file':
+            upload = part
+            break
+    if upload is None or not upload.filename:
+        raise web.HTTPBadRequest(reason='file is required')
+    if language != 'auto' and not SUBTITLE_LANGUAGE_RE.fullmatch(language):
+        raise web.HTTPBadRequest(reason='language must be auto or a language code')
+
+    original_name = pathlib.Path(upload.filename).name
+    safe_name = _sanitize_path_component(original_name)
+    stem = pathlib.Path(safe_name).stem or 'media'
+    suffix = pathlib.Path(safe_name).suffix.lower()
+    allowed_extensions = {'.mp3', '.mp4', '.m4a', '.wav', '.webm', '.ogg', '.flac', '.mov', '.mkv', '.aac', '.opus'}
+    if suffix not in allowed_extensions:
+        raise web.HTTPBadRequest(reason='unsupported audio or video file type')
+    root = os.path.realpath(config.DOWNLOAD_DIR)
+    candidate = os.path.join(root, safe_name)
+    counter = 1
+    while os.path.exists(candidate):
+        candidate = os.path.join(root, f'{stem} ({counter}){suffix}')
+        counter += 1
+
+    try:
+        with open(candidate, 'xb') as destination:
+            while chunk := await upload.read_chunk(size=1024 * 1024):
+                await asyncio.to_thread(destination.write, chunk)
+    except Exception:
+        try:
+            os.remove(candidate)
+        except OSError:
+            pass
+        raise
+
+    info = SimpleNamespace(
+        filename=os.path.relpath(candidate, root),
+        title=stem,
+        url=None,
+        subtitle_files=[],
+        entry={},
+        transcription_language=language,
+    )
+    try:
+        async with dqueue.transcription_semaphore:
+            result = await dqueue.transcription.transcribe(info)
+    except Exception as exc:
+        log.warning('Uploaded-file transcription failed for %s: %s', candidate, exc)
+        raise web.HTTPBadGateway(reason=str(exc)) from exc
+    return web.json_response({
+        'status': 'ok',
+        'filename': os.path.relpath(candidate, root),
+        'result': result,
+    })
 
 @routes.post(config.URL_PREFIX + 'cancel-add')
 async def cancel_add(request):
@@ -1118,6 +1269,41 @@ async def history(request):
     log.info("Sending download history")
     return web.Response(text=serializer.encode(history))
 
+
+@routes.post(config.URL_PREFIX + 'desktop-settings')
+async def desktop_settings(request):
+    """Persist desktop-only settings and restart so static routes use the new root."""
+    global _RESTART_FOR_UPDATE
+    config_path = os.environ.get('METUBE_DESKTOP_CONFIG')
+    if not config_path:
+        raise web.HTTPNotFound()
+
+    data = await request.json()
+    download_dir = data.get('download_dir') if isinstance(data, dict) else None
+    if not isinstance(download_dir, str) or not download_dir.strip():
+        raise web.HTTPBadRequest(reason='A pasta de downloads é obrigatória')
+    download_dir = os.path.realpath(os.path.expanduser(download_dir.strip()))
+    if not os.path.isabs(download_dir):
+        raise web.HTTPBadRequest(reason='Use o caminho completo da pasta')
+    try:
+        os.makedirs(download_dir, exist_ok=True)
+        if not os.path.isdir(download_dir) or not os.access(download_dir, os.W_OK):
+            raise OSError('directory is not writable')
+        config_parent = os.path.dirname(config_path)
+        os.makedirs(config_parent, exist_ok=True)
+        temporary_path = config_path + '.tmp'
+        with open(temporary_path, 'w', encoding='utf-8') as settings_file:
+            json.dump({'download_dir': download_dir}, settings_file, ensure_ascii=False, indent=2)
+            settings_file.write('\n')
+        os.replace(temporary_path, config_path)
+    except OSError as exc:
+        log.warning('Could not save desktop settings: %s', exc)
+        raise web.HTTPBadRequest(reason='Não foi possível criar ou gravar nessa pasta') from exc
+
+    _RESTART_FOR_UPDATE = True
+    asyncio.get_running_loop().call_later(0.5, _request_graceful_exit)
+    return web.json_response({'status': 'ok', 'download_dir': download_dir, 'restarting': True})
+
 @sio.event
 async def connect(sid, environ):
     log.info(f"Client connected: {sid}")
@@ -1253,6 +1439,9 @@ app.router.add_route('OPTIONS', config.URL_PREFIX + 'subscriptions/delete', add_
 app.router.add_route('OPTIONS', config.URL_PREFIX + 'subscriptions/check', add_cors)
 app.router.add_route('OPTIONS', config.URL_PREFIX + 'upload-cookies', add_cors)
 app.router.add_route('OPTIONS', config.URL_PREFIX + 'delete-cookies', add_cors)
+app.router.add_route('OPTIONS', config.URL_PREFIX + 'desktop-settings', add_cors)
+app.router.add_route('OPTIONS', config.URL_PREFIX + 'transcribe-local', add_cors)
+app.router.add_route('OPTIONS', config.URL_PREFIX + 'transcribe-upload', add_cors)
 
 async def on_prepare(request, response):
     origin = request.headers.get('Origin')

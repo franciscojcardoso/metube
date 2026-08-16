@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=MeTube
+Comment=Baixe e transcreva vídeos e áudios localmente
+Exec=@PROJECT_DIR@/scripts/metube-launch
+Icon=@PROJECT_DIR@/ui/src/assets/icons/android-chrome-192x192.png
+Terminal=false
+Categories=AudioVideo;AudioVideoEditing;
+StartupNotify=true

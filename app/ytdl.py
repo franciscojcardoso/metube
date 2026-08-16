@@ -28,6 +28,7 @@ from datetime import datetime
 from state_store import AtomicJsonStore, from_json_compatible, read_legacy_shelf, to_json_compatible
 from subscriptions import _entry_id
 from url_guard import validate_url, install_socket_guard
+from transcription import TranscriptionService
 from urllib.parse import urlsplit
 
 log = logging.getLogger('ytdl')
@@ -348,6 +349,8 @@ class DownloadInfo:
         clip_end=None,
         live_status=None,
         live_release_timestamp=None,
+        transcribe=False,
+        transcription_language="auto",
     ):
         self.id = id if len(custom_name_prefix) == 0 else f'{custom_name_prefix}.{id}'
         self.title = title if len(custom_name_prefix) == 0 else f'{custom_name_prefix}.{title}'
@@ -377,6 +380,10 @@ class DownloadInfo:
         self.live_status = live_status
         self.live_release_timestamp = live_release_timestamp
         self.subtitle_files = []
+        self.transcribe = transcribe
+        self.transcription_language = transcription_language
+        self.transcription_result = None
+        self.transcription_error = None
 
     # Fields that are useful server-side but must not be broadcast to browser
     # clients: ``entry`` is the full yt-dlp info-dict (potentially large and
@@ -466,6 +473,14 @@ class DownloadInfo:
             self.live_status = None
         if not hasattr(self, "live_release_timestamp"):
             self.live_release_timestamp = None
+        if not hasattr(self, "transcribe"):
+            self.transcribe = False
+        if not hasattr(self, "transcription_language"):
+            self.transcription_language = "auto"
+        if not hasattr(self, "transcription_result"):
+            self.transcription_result = None
+        if not hasattr(self, "transcription_error"):
+            self.transcription_error = None
 
 
 _PERSISTED_DOWNLOAD_FIELDS = (
@@ -483,6 +498,8 @@ _PERSISTED_DOWNLOAD_FIELDS = (
     "chapter_template",
     "subtitle_language",
     "subtitle_mode",
+    "transcribe",
+    "transcription_language",
     "ytdl_options_presets",
     "ytdl_options_overrides",
     "clip_start",
@@ -496,6 +513,8 @@ _PERSISTED_DOWNLOAD_FIELDS = (
     "filename",
     "size",
     "chapter_files",
+    "transcription_result",
+    "transcription_error",
 )
 
 
@@ -592,6 +611,21 @@ class Download:
             subtitle_language=getattr(info, 'subtitle_language', 'en'),
             subtitle_mode=getattr(info, 'subtitle_mode', 'prefer_manual'),
         )
+        if getattr(info, 'transcribe', False):
+            # Always obtain the site's best matching caption as a candidate.
+            # Whisper still runs; the two hypotheses are ranked afterwards.
+            language = getattr(info, 'transcription_language', 'auto')
+            if language == 'auto':
+                language = getattr(info, 'subtitle_language', 'en')
+            self.ytdl_opts['writesubtitles'] = True
+            self.ytdl_opts['writeautomaticsub'] = True
+            self.ytdl_opts['subtitleslangs'] = [language, f'{language}-orig']
+            self.ytdl_opts['subtitlesformat'] = 'srt/best'
+            self.ytdl_opts.setdefault('postprocessors', []).insert(0, {
+                'key': 'FFmpegSubtitlesConvertor',
+                'format': 'srt',
+                'when': 'before_dl',
+            })
         if "impersonate" in self.ytdl_opts:
             self.ytdl_opts["impersonate"] = yt_dlp.networking.impersonate.ImpersonateTarget.from_str(self.ytdl_opts["impersonate"])
         self.canceled = False
@@ -680,7 +714,7 @@ class Download:
                     # For captions-only downloads, yt-dlp may still report a media-like
                     # filepath in MoveFiles. Capture subtitle outputs explicitly so the
                     # UI can link to real caption files.
-                    if getattr(self.info, 'download_type', '') == 'captions':
+                    if getattr(self.info, 'download_type', '') == 'captions' or getattr(self.info, 'transcribe', False):
                         requested_subtitles = d.get('info_dict', {}).get('requested_subtitles', {}) or {}
                         for subtitle in requested_subtitles.values():
                             if isinstance(subtitle, dict) and subtitle.get('filepath'):
@@ -1042,6 +1076,8 @@ class DownloadQueue:
         self.pending = PersistentQueue("pending", self.config.STATE_DIR + '/pending')
         self.active_downloads = set()
         self.semaphore = asyncio.Semaphore(int(self.config.MAX_CONCURRENT_DOWNLOADS))
+        self.transcription = TranscriptionService(config) if getattr(config, 'TRANSCRIPTION_ENABLED', False) else None
+        self.transcription_semaphore = asyncio.Semaphore(1)
         # Each active download parks two threads for its whole duration
         # (proc.join + status_queue.get). A dedicated pool keeps those from
         # starving the default executor, which extract_info/live-probes also use.
@@ -1245,7 +1281,28 @@ class DownloadQueue:
                 log.info(f"Download {download.info.title} was canceled, skipping start.")
                 return
             await download.start(self.notifier, self._download_executor)
+            if download.info.status == 'finished' and getattr(download.info, 'transcribe', False):
+                await self._transcribe_download(download)
             self._post_download_cleanup(download)
+
+    async def _transcribe_download(self, download):
+        if self.transcription is None:
+            download.info.transcription_error = 'transcription service is not configured'
+            return
+        download.info.status = 'transcribing'
+        download.info.msg = 'Transcrevendo e comparando legendas'
+        await self.notifier.updated(download.info)
+        try:
+            async with self.transcription_semaphore:
+                result = await self.transcription.transcribe(download.info)
+            download.info.transcription_result = result
+            download.info.transcription_error = None
+        except Exception as exc:  # Supplemental processing must not fail the download.
+            log.warning('Transcription failed for %s: %s', download.info.title, exc)
+            download.info.transcription_error = str(exc)
+        finally:
+            download.info.status = 'finished'
+            download.info.msg = None
 
     def _post_download_cleanup(self, download):
         if download.info.status != 'finished':
@@ -1481,6 +1538,8 @@ class DownloadQueue:
         ytdl_options_overrides,
         clip_start,
         clip_end,
+        transcribe,
+        transcription_language,
         already,
         _add_gen=None,
         retry_entry=None,
@@ -1524,6 +1583,8 @@ class DownloadQueue:
                 ytdl_options_overrides,
                 clip_start,
                 clip_end,
+                transcribe,
+                transcription_language,
                 already,
                 _add_gen,
                 retry_entry,
@@ -1592,6 +1653,8 @@ class DownloadQueue:
                         ytdl_options_overrides,
                         clip_start,
                         clip_end,
+                        transcribe,
+                        transcription_language,
                         already,
                         _add_gen,
                     )
@@ -1634,6 +1697,8 @@ class DownloadQueue:
                 clip_end=clip_end,
                 live_status=entry.get('live_status'),
                 live_release_timestamp=entry.get('release_timestamp'),
+                transcribe=transcribe,
+                transcription_language=transcription_language,
             )
             await self.__add_download(dl, auto_start)
             return {'status': 'ok'}
@@ -1658,6 +1723,8 @@ class DownloadQueue:
         ytdl_options_overrides,
         clip_start,
         clip_end,
+        transcribe=False,
+        transcription_language="auto",
         entry=None,
     ):
         """Surface a URL that failed before a DownloadInfo could be created (unsupported
@@ -1685,6 +1752,8 @@ class DownloadQueue:
             ytdl_options_overrides=ytdl_options_overrides,
             clip_start=clip_start,
             clip_end=clip_end,
+            transcribe=transcribe,
+            transcription_language=transcription_language,
         )
         info.status = 'error'
         info.msg = msg
@@ -1711,6 +1780,8 @@ class DownloadQueue:
         ytdl_options_overrides=None,
         clip_start=None,
         clip_end=None,
+        transcribe=False,
+        transcription_language="auto",
         already=None,
         _add_gen=None,
         retry_entry=None,
@@ -1720,7 +1791,8 @@ class DownloadQueue:
         log.info(
             f'adding {url}: {download_type=} {codec=} {format=} {quality=} {already=} {folder=} {custom_name_prefix=} '
             f'{playlist_item_limit=} {auto_start=} {split_by_chapters=} {chapter_template=} '
-            f'{subtitle_language=} {subtitle_mode=} {ytdl_options_presets=} {clip_start=} {clip_end=}'
+            f'{subtitle_language=} {subtitle_mode=} {ytdl_options_presets=} {clip_start=} {clip_end=} '
+            f'{transcribe=} {transcription_language=}'
         )
         if already is None:
             _add_gen = self._add_generation
@@ -1742,7 +1814,7 @@ class DownloadQueue:
                 url, url_error, download_type, codec, format, quality, folder,
                 custom_name_prefix, playlist_item_limit, split_by_chapters, chapter_template,
                 subtitle_language, subtitle_mode, ytdl_options_presets, ytdl_options_overrides,
-                clip_start, clip_end, retry_entry,
+                clip_start, clip_end, transcribe, transcription_language, retry_entry,
             )
             return {'status': 'error', 'msg': url_error}
         try:
@@ -1756,7 +1828,7 @@ class DownloadQueue:
                 url, msg, download_type, codec, format, quality, folder,
                 custom_name_prefix, playlist_item_limit, split_by_chapters, chapter_template,
                 subtitle_language, subtitle_mode, ytdl_options_presets, ytdl_options_overrides,
-                clip_start, clip_end, retry_entry,
+                clip_start, clip_end, transcribe, transcription_language, retry_entry,
             )
             return {'status': 'error', 'msg': msg}
         retry_context = _compact_persisted_entry(retry_entry)
@@ -1780,6 +1852,8 @@ class DownloadQueue:
             ytdl_options_overrides,
             clip_start,
             clip_end,
+            transcribe,
+            transcription_language,
             already,
             _add_gen,
             retry_entry,
@@ -1818,6 +1892,8 @@ class DownloadQueue:
             overrides,
             info.clip_start,
             info.clip_end,
+            info.transcribe,
+            info.transcription_language,
             retry_entry=info.entry,
         )
 
@@ -1840,6 +1916,8 @@ class DownloadQueue:
         ytdl_options_overrides=None,
         clip_start=None,
         clip_end=None,
+        transcribe=False,
+        transcription_language="auto",
     ):
         if ytdl_options_presets is None:
             ytdl_options_presets = []
@@ -1863,6 +1941,8 @@ class DownloadQueue:
             ytdl_options_overrides,
             clip_start,
             clip_end,
+            transcribe,
+            transcription_language,
             already,
             None,
         )
@@ -1930,6 +2010,9 @@ class DownloadQueue:
                     for extra in (getattr(dl.info, 'subtitle_files', None) or []):
                         if isinstance(extra, dict) and extra.get('filename'):
                             rel_names.append(extra['filename'])
+                    result = getattr(dl.info, 'transcription_result', None) or {}
+                    if isinstance(result, dict) and result.get('markdown'):
+                        rel_names.append(result['markdown'])
                     real_base_directory = os.path.realpath(dldirectory)
                     for rel_name in rel_names:
                         full_path = os.path.realpath(os.path.join(dldirectory, rel_name))

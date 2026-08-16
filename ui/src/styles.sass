@@ -2,9 +2,14 @@
 
 .navbar
     background-color: var(--bs-dark) !important
+    min-height: 58px
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18)
 
     [data-bs-theme="dark"] &
         background-color: var(--bs-dark-bg-subtle) !important
+
+body
+    background: var(--bs-tertiary-bg)
 
 .ng-select
     flex: 1
@@ -24,3 +29,43 @@
                 white-space: nowrap
                 overflow: visible
                 text-overflow: ellipsis
+
+// Keep NG-ZORRO controls aligned with MeTube's Bootstrap dark theme.
+[data-bs-theme="dark"]
+    .ant-card
+        color: var(--bs-body-color)
+        background: var(--bs-body-bg)
+        border-color: var(--bs-border-color)
+
+    .ant-card-head
+        color: var(--bs-body-color)
+        border-bottom-color: var(--bs-border-color)
+
+    .ant-input,
+    .ant-select-selector
+        color: var(--bs-body-color) !important
+        background: var(--bs-tertiary-bg) !important
+        border-color: var(--bs-border-color) !important
+
+    .ant-input::placeholder,
+    .ant-select-selection-placeholder,
+    .ant-select-arrow,
+    .ant-tabs-tab
+        color: var(--bs-secondary-color)
+
+    .ant-tabs-tab:hover,
+    .ant-tabs-tab-active .ant-tabs-tab-btn
+        color: var(--bs-primary) !important
+
+    .ant-tabs-nav::before,
+    .ant-upload-list-item
+        border-color: var(--bs-border-color)
+
+    .ant-upload-list-item,
+    .ant-upload-list-item-name
+        color: var(--bs-body-color)
+
+    .ant-alert-success
+        color: #b7ebc6
+        background: #102f1d
+        border-color: #23683b

@@ -1,7 +1,7 @@
 import { inject, Injectable } from '@angular/core';
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { of, Subject } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { HttpClient, HttpErrorResponse, HttpEvent, HttpResponse } from '@angular/common/http';
+import { Observable, of, Subject } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
 import { MeTubeSocket } from './metube-socket.service';
 import { Download, Status, State } from '../interfaces';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -20,6 +20,8 @@ export interface AddDownloadPayload {
   chapterTemplate: string;
   subtitleLanguage: string;
   subtitleMode: string;
+  transcribe?: boolean;
+  transcriptionLanguage?: string;
   ytdlOptionsPresets: string[];
   ytdlOptionsOverrides: string;
   clipStart?: string;
@@ -151,6 +153,8 @@ export class DownloadsService {
       chapter_template: payload.chapterTemplate,
       subtitle_language: payload.subtitleLanguage,
       subtitle_mode: payload.subtitleMode,
+      transcribe: payload.transcribe ?? false,
+      transcription_language: payload.transcriptionLanguage ?? 'auto',
       ytdl_options_presets: payload.ytdlOptionsPresets,
       ytdl_options_overrides: payload.ytdlOptionsOverrides,
     };
@@ -167,6 +171,23 @@ export class DownloadsService {
     return this.http.get<{ presets: string[] }>('presets').pipe(
       catchError(() => of({ presets: [] }))
     );
+  }
+
+  public transcribeLocal(path: string, language: string) {
+    return this.http.post<Status & { result?: { markdown?: string } }>(
+      'transcribe-local', { path, language },
+    ).pipe(catchError(this.handleHTTPError));
+  }
+
+  public transcribeUpload(file: File, language: string): Observable<HttpEvent<Status & { result?: { markdown?: string } }>> {
+    const body = new FormData();
+    body.append('language', language);
+    body.append('file', file, file.name);
+    return this.http.post<Status & { result?: { markdown?: string } }>(
+      'transcribe-upload', body, { observe: 'events', reportProgress: true },
+    ).pipe(catchError(error => this.handleHTTPError(error).pipe(
+      map(response => new HttpResponse({ body: response })),
+    )));
   }
 
   public retry(id: string) {
@@ -243,6 +264,13 @@ export class DownloadsService {
   getCookieStatus() {
     return this.http.get<{ status: string; has_cookies: boolean }>('cookie-status').pipe(
       catchError(this.handleHTTPError)
+    );
+  }
+
+  saveDesktopSettings(downloadDir: string) {
+    return this.http.post<{ status: string; download_dir: string; restarting: boolean }>(
+      'desktop-settings',
+      { download_dir: downloadDir },
     );
   }
 }

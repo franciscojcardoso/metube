@@ -1,0 +1,13 @@
+[Unit]
+Description=MeTube - baixador de vídeos
+After=network-online.target metube-whisper.service
+Wants=metube-whisper.service
+
+[Service]
+Type=simple
+ExecStart=@PROJECT_DIR@/scripts/metube-service
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

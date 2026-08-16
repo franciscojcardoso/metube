@@ -254,6 +254,34 @@ MeTube deliberately stops once the file is written — tagging and library organ
 * [MusicBrainz Picard](https://picard.musicbrainz.org) — GUI tagger with acoustic fingerprinting.
 * [Lidarr](https://lidarr.audio) — full music library manager; add the folder as an import path.
 
+## 📝 Local transcription
+
+This fork can transcribe video/audio after downloading it and can also transcribe an
+existing file inside `DOWNLOAD_DIR`. Start the bundled CPU stack with:
+
+```bash
+docker compose -f compose.transcription.yml up -d --build
+```
+
+The first start downloads the configured Whisper model. Select **Transcrever e
+escolher a melhor legenda** in the download form. When a site supplies captions,
+MeTube still runs Whisper, scores both candidates, and writes:
+
+- `<media>.whisper.srt`: the Whisper hypothesis;
+- `<media>.srt`: the selected canonical subtitle;
+- `<media>.txt`: plain Whisper text;
+- `<media>.md`: readable transcript with YAML front matter and timestamp sections;
+- `<media>.transcription.json`: winner and quality signals.
+
+Manual captions win near ties. Otherwise selection considers temporal coverage,
+repetition, agreement between candidates, caption origin, and Whisper confidence.
+This is reference-free estimation, not a substitute for human review.
+
+To use another OpenAI-compatible transcription server, configure
+`TRANSCRIPTION_URL`, `TRANSCRIPTION_API_KEY`, `TRANSCRIPTION_MODEL`, and optionally
+`TRANSCRIPTION_TIMEOUT`. Local paths are intentionally restricted to
+`DOWNLOAD_DIR`.
+
 ## 🔒 HTTPS support, and running behind a reverse proxy
 
 It's possible to configure MeTube to listen in HTTPS mode. `docker-compose` example:

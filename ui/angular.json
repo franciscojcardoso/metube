@@ -29,12 +29,19 @@
               "src/custom-service-worker.js"
             ],
             "styles": [
+              "node_modules/ng-zorro-antd/style/index.min.css",
+              "node_modules/ng-zorro-antd/button/style/index.min.css",
+              "node_modules/ng-zorro-antd/input/style/index.min.css",
+              "node_modules/ng-zorro-antd/tabs/style/index.min.css",
+              "node_modules/ng-zorro-antd/card/style/index.min.css",
+              "node_modules/ng-zorro-antd/alert/style/index.min.css",
+              "node_modules/ng-zorro-antd/select/style/index.min.css",
+              "node_modules/ng-zorro-antd/upload/style/index.min.css",
               "node_modules/bootstrap/dist/css/bootstrap.min.css",
               "node_modules/@ng-select/ng-select/themes/default.theme.css",
               "src/styles.sass"
             ],
             "scripts": [],
-            "serviceWorker": "ngsw-config.json",
             "browser": "src/main.ts",
             "polyfills": [
               "zone.js",
@@ -55,7 +62,7 @@
                 },
                 {
                   "type": "anyComponentStyle",
-                  "maximumWarning": "6kb",
+                  "maximumWarning": "8kb",
                   "maximumError": "10kb"
                 }
               ]
