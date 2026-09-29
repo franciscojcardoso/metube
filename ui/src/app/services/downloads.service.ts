@@ -179,10 +179,12 @@ export class DownloadsService {
     ).pipe(catchError(this.handleHTTPError));
   }
 
-  public transcribeUpload(file: File, language: string): Observable<HttpEvent<Status & { result?: { markdown?: string } }>> {
+  public transcribeUpload(files: File | File[], language: string): Observable<HttpEvent<Status & { result?: { markdown?: string } }>> {
     const body = new FormData();
     body.append('language', language);
-    body.append('file', file, file.name);
+    for (const file of Array.isArray(files) ? files : [files]) {
+      body.append('file', file, file.name);
+    }
     return this.http.post<Status & { result?: { markdown?: string } }>(
       'transcribe-upload', body, { observe: 'events', reportProgress: true },
     ).pipe(catchError(error => this.handleHTTPError(error).pipe(

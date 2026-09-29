@@ -723,11 +723,11 @@
         </nz-card>
 
         <nz-card class="transcription-card mb-4" nzTitle="Arquivo deste computador">
-          <p class="text-body-secondary">Escolha um áudio ou vídeo no navegador de arquivos do Linux.</p>
+          <p class="text-body-secondary">Escolha um áudio ou vídeo. Para juntar áudios, selecione todos eles de uma vez.</p>
           <div class="file-picker-panel">
             <div class="file-picker-icon" aria-hidden="true"><fa-icon [icon]="faFileAudio" /></div>
             <div class="file-picker-copy">
-              <strong>{{ selectedTranscriptionFile?.name || 'Escolha o arquivo que deseja transcrever' }}</strong>
+              <strong>{{ selectedTranscriptionFiles.length ? (selectedTranscriptionFiles.length === 1 ? selectedTranscriptionFiles[0].name : selectedTranscriptionFiles.length + ' arquivos selecionados') : 'Escolha os arquivos que deseja transcrever' }}</strong>
               <span>MP3, MP4, WAV, M4A, WebM, OGG, FLAC, MOV, MKV, AAC ou OPUS</span>
             </div>
             <label for="transcription-file" class="ant-btn ant-btn-default ant-btn-lg file-picker-button"
@@ -737,18 +737,19 @@
             </label>
             <input id="transcription-file" class="form-control file-picker-native" type="file"
               accept="audio/*,video/*,.mp3,.mp4,.m4a,.wav,.webm,.ogg,.flac,.mov,.mkv,.aac,.opus"
+              multiple
               [disabled]="localTranscriptionInProgress"
               (change)="onTranscriptionFileSelect($event)">
           </div>
           <div class="file-actions">
-            @if (selectedTranscriptionFile) {
+            @if (selectedTranscriptionFiles.length) {
               <button nz-button nzSize="large" type="button" (click)="clearTranscriptionFile()"
                 [disabled]="localTranscriptionInProgress">Remover</button>
             }
             <button nz-button nzType="primary" nzSize="large" type="button" (click)="transcribeSelectedFile()"
               [nzLoading]="localTranscriptionInProgress"
-              [disabled]="!selectedTranscriptionFile || !transcriptionEnabled()">
-              Transcrever arquivo
+              [disabled]="!selectedTranscriptionFiles.length || !transcriptionEnabled()">
+              {{ selectedTranscriptionFiles.length > 1 ? 'Juntar e transcrever arquivos' : 'Transcrever arquivo' }}
             </button>
           </div>
           @if (localTranscriptionInProgress) {

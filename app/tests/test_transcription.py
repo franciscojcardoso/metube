@@ -146,3 +146,60 @@ async def test_comparison_caption_is_removed_after_markdown_is_written(tmp_path,
     assert Path(tmp_path / result["markdown"]).is_file()
     assert not subtitle.exists()
     assert sorted(path.name for path in tmp_path.iterdir()) == ["video.md", "video.mp4"]
+
+
+async def test_transcribe_upload_saves_content_and_transcribes(tmp_path, aiohttp_client, monkeypatch):
+    import aiohttp
+    from unittest.mock import AsyncMock, MagicMock
+    import main
+
+    monkeypatch.setattr(main.config, "DOWNLOAD_DIR", str(tmp_path))
+    mock_service = MagicMock()
+    mock_service.transcribe = AsyncMock(return_value={"winner": "whisper", "markdown": "aula.md"})
+    monkeypatch.setattr(main.dqueue, "transcription", mock_service)
+
+    main.app._loop = None
+    client = await aiohttp_client(main.app)
+    form = aiohttp.FormData()
+    form.add_field("language", "pt")
+    form.add_field("file", b"RIFFfakeaudiodata", filename="aula.mp3", content_type="audio/mpeg")
+
+    resp = await client.post("/transcribe-upload", data=form)
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["status"] == "ok"
+    assert data["filename"] == "aula.mp3"
+    assert (tmp_path / "aula.mp3").read_bytes() == b"RIFFfakeaudiodata"
+    mock_service.transcribe.assert_awaited_once()
+
+
+async def test_transcribe_upload_multiple_files_joins_and_transcribes(tmp_path, aiohttp_client, monkeypatch):
+    import aiohttp
+    from unittest.mock import AsyncMock, MagicMock
+    import main
+
+    monkeypatch.setattr(main.config, "DOWNLOAD_DIR", str(tmp_path))
+    mock_service = MagicMock()
+    mock_service.transcribe = AsyncMock(return_value={"winner": "whisper", "markdown": "audio1 - combinado.md"})
+    monkeypatch.setattr(main.dqueue, "transcription", mock_service)
+
+    main.app._loop = None
+    client = await aiohttp_client(main.app)
+    form = aiohttp.FormData()
+    form.add_field("language", "auto")
+    form.add_field("file", b"first", filename="audio1.mp3", content_type="audio/mpeg")
+    form.add_field("file", b"second", filename="audio2.mp3", content_type="audio/mpeg")
+
+    mock_run = MagicMock(return_value=MagicMock(returncode=0))
+    monkeypatch.setattr(main.subprocess, "run", mock_run)
+    monkeypatch.setattr(main.shutil, "which", lambda cmd: "/usr/bin/ffmpeg")
+
+    resp = await client.post("/transcribe-upload", data=form)
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["status"] == "ok"
+    assert "combinado" in data["filename"]
+    assert (tmp_path / "audio1.mp3").read_bytes() == b"first"
+    assert (tmp_path / "audio2.mp3").read_bytes() == b"second"
+    mock_service.transcribe.assert_awaited_once()
+

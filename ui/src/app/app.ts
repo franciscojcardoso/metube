@@ -110,6 +110,7 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
   transcriptionResultTitle = '';
   transcriptionResultMessage = '';
   selectedTranscriptionFile: File | null = null;
+  selectedTranscriptionFiles: File[] = [];
   activeWorkspaceTab: 'download' | 'transcribe' = 'download';
   subtitleMode: string;
   ytdlOptionsPresets: string[] = [];
@@ -966,6 +967,7 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
   onTranscriptionFileSelect(event: Event) {
     const input = event.target as HTMLInputElement;
     this.selectedTranscriptionFile = input.files?.[0] ?? null;
+    this.selectedTranscriptionFiles = Array.from(input.files ?? []);
     this.clearTranscriptionResult();
     this.cdr.markForCheck();
   }
@@ -978,19 +980,22 @@ export class App implements AfterViewInit, OnInit, OnDestroy {
 
   clearTranscriptionFile() {
     this.selectedTranscriptionFile = null;
+    this.selectedTranscriptionFiles = [];
     const input = document.querySelector<HTMLInputElement>('#transcription-file');
     if (input) input.value = '';
     this.cdr.markForCheck();
   }
 
   transcribeSelectedFile() {
-    const file = this.selectedTranscriptionFile;
-    if (!file || this.localTranscriptionInProgress) return;
+    const files = this.selectedTranscriptionFiles.length
+      ? this.selectedTranscriptionFiles
+      : this.selectedTranscriptionFile ? [this.selectedTranscriptionFile] : [];
+    if (!files.length || this.localTranscriptionInProgress) return;
     this.clearTranscriptionResult();
     this.localTranscriptionInProgress = true;
     this.transcriptionUploadProgress = 0;
     this.transcriptionProgressPhase = 'uploading';
-    this.downloads.transcribeUpload(file, this.transcriptionLanguage).pipe(
+    this.downloads.transcribeUpload(files, this.transcriptionLanguage).pipe(
       finalize(() => {
         this.localTranscriptionInProgress = false;
         this.transcriptionProgressPhase = 'idle';

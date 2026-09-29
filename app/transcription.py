@@ -260,7 +260,7 @@ class TranscriptionService:
             duration = float(getattr(info, "entry", {}).get("duration") or 0)
             whisper_cues = [(0.0, duration, str(payload["text"]).strip())]
         if not whisper_cues:
-            raise RuntimeError("transcription server returned no text")
+            whisper_cues = [(0.0, 0.0, "(Nenhuma fala detectada)")]
 
         base = Path(media_path).with_suffix("")
         source_path = self._source_subtitle(info)
@@ -285,7 +285,7 @@ class TranscriptionService:
         markdown_metadata = {
             "title": getattr(info, "title", None) or base.name,
             "source_url": getattr(info, "url", None),
-            "media_file": os.path.relpath(media_path, self.download_dir),
+            "media_file": Path(os.path.relpath(media_path, self.download_dir)).as_posix(),
             "language": payload.get("language") or language,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "selected_source": winner,
@@ -309,7 +309,7 @@ class TranscriptionService:
 
         report = {
             "winner": winner,
-            "markdown": os.path.relpath(markdown_path, self.download_dir),
+            "markdown": Path(os.path.relpath(markdown_path, self.download_dir)).as_posix(),
             "source_score": source_score.__dict__ if source_score else None,
             "whisper_score": whisper_score.__dict__ if whisper_score else None,
         }

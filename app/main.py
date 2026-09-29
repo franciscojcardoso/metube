@@ -6,6 +6,8 @@ import sys
 import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
+import shutil
+import subprocess
 from aiohttp import web
 from aiohttp.web import GracefulExit
 from aiohttp.log import access_logger
@@ -53,6 +55,22 @@ def parseLogLevel(logLevel):
 # Only configure if no handlers are set (avoid clobbering hosting app settings).
 if not logging.getLogger().hasHandlers():
     logging.basicConfig(level=parseLogLevel(os.environ.get('LOGLEVEL', 'INFO')) or logging.INFO)
+
+_log_file = os.environ.get('LOG_FILE')
+if _log_file:
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(_log_file)), exist_ok=True)
+        _fh = logging.FileHandler(_log_file, encoding='utf-8')
+        _fh.setLevel(parseLogLevel(os.environ.get('LOGLEVEL', 'INFO')) or logging.INFO)
+        _fh.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+        logging.getLogger().addHandler(_fh)
+    except Exception as _e:
+        pass
+
+def _handle_uncaught_exception(exc_type, exc_value, exc_traceback):
+    log.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+sys.excepthook = _handle_uncaught_exception
 
 class Config:
     _DEFAULTS = {
@@ -351,7 +369,7 @@ async def state_dir_guard(request, handler):
     return await handler(request)
 
 
-app = web.Application(middlewares=[state_dir_guard])
+app = web.Application(client_max_size=4 * 1024 * 1024 * 1024, middlewares=[state_dir_guard])
 _cors_origins = [o.strip() for o in config.CORS_ALLOWED_ORIGINS.split(',') if o.strip()] if config.CORS_ALLOWED_ORIGINS else []
 sio = socketio.AsyncServer(cors_allowed_origins=_cors_origins if _cors_origins else [])
 sio.attach(app, socketio_path=config.URL_PREFIX + 'socket.io')
@@ -960,7 +978,8 @@ async def transcribe_local(request):
     if not os.path.isfile(candidate):
         raise web.HTTPNotFound(reason='media file was not found')
     info = SimpleNamespace(
-        filename=os.path.relpath(candidate, root),
+        filename=pathlib.Path(os.path.relpath(candidate, root)).as_posix(),
+        title=pathlib.Path(candidate).stem,
         subtitle_files=[],
         entry={},
         transcription_language=language,
@@ -976,50 +995,85 @@ async def transcribe_local(request):
 
 @routes.post(config.URL_PREFIX + 'transcribe-upload')
 async def transcribe_upload(request):
-    """Save a browser-selected media file in DOWNLOAD_DIR, then transcribe it."""
+    """Save browser-selected media, join multiple files, then transcribe them."""
     if dqueue.transcription is None:
         raise web.HTTPServiceUnavailable(reason='transcription is not configured')
     reader = await request.multipart()
-    upload = None
+    allowed = {'.mp3', '.mp4', '.m4a', '.wav', '.webm', '.ogg', '.flac', '.mov', '.mkv', '.aac', '.opus'}
+    root = os.path.realpath(config.DOWNLOAD_DIR)
+    saved_paths = []
     language = 'auto'
-    while part := await reader.next():
-        if part.name == 'language':
-            language = (await part.text()).strip()
-        elif part.name == 'file':
-            upload = part
-            break
-    if upload is None or not upload.filename:
-        raise web.HTTPBadRequest(reason='file is required')
+
+    try:
+        while True:
+            part = await reader.next()
+            if part is None:
+                break
+            if part.name == 'language':
+                language = (await part.text()).strip()
+            elif part.name == 'file' and part.filename:
+                safe_name = _sanitize_path_component(pathlib.Path(part.filename).name)
+                stem = pathlib.Path(safe_name).stem or 'media'
+                suffix = pathlib.Path(safe_name).suffix.lower()
+                if suffix not in allowed:
+                    raise web.HTTPBadRequest(reason=f'unsupported audio or video file type: {suffix}')
+                candidate = os.path.join(root, safe_name)
+                counter = 1
+                while os.path.exists(candidate):
+                    candidate = os.path.join(root, f'{stem} ({counter}){suffix}')
+                    counter += 1
+                with open(candidate, 'xb') as destination:
+                    while chunk := await part.read_chunk(size=1024 * 1024):
+                        await asyncio.to_thread(destination.write, chunk)
+                saved_paths.append(candidate)
+    except Exception:
+        for path in saved_paths:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        raise
+
+    if not saved_paths:
+        raise web.HTTPBadRequest(reason='at least one file is required')
     if language != 'auto' and not SUBTITLE_LANGUAGE_RE.fullmatch(language):
         raise web.HTTPBadRequest(reason='language must be auto or a language code')
 
-    original_name = pathlib.Path(upload.filename).name
-    safe_name = _sanitize_path_component(original_name)
-    stem = pathlib.Path(safe_name).stem or 'media'
-    suffix = pathlib.Path(safe_name).suffix.lower()
-    allowed_extensions = {'.mp3', '.mp4', '.m4a', '.wav', '.webm', '.ogg', '.flac', '.mov', '.mkv', '.aac', '.opus'}
-    if suffix not in allowed_extensions:
-        raise web.HTTPBadRequest(reason='unsupported audio or video file type')
-    root = os.path.realpath(config.DOWNLOAD_DIR)
-    candidate = os.path.join(root, safe_name)
-    counter = 1
-    while os.path.exists(candidate):
-        candidate = os.path.join(root, f'{stem} ({counter}){suffix}')
-        counter += 1
-
-    try:
-        with open(candidate, 'xb') as destination:
-            while chunk := await upload.read_chunk(size=1024 * 1024):
-                await asyncio.to_thread(destination.write, chunk)
-    except Exception:
-        try:
-            os.remove(candidate)
-        except OSError:
-            pass
-        raise
+    candidate = saved_paths[0]
+    stem = pathlib.Path(candidate).stem
+    if len(saved_paths) > 1:
+        if not shutil.which('ffmpeg'):
+            raise web.HTTPServiceUnavailable(reason='ffmpeg is required to join multiple audio files')
+        first_stem = pathlib.Path(saved_paths[0]).stem
+        merged_stem = f'{first_stem} - combinado'
+        candidate = os.path.join(root, f'{merged_stem}.mp3')
+        counter = 1
+        while os.path.exists(candidate):
+            candidate = os.path.join(root, f'{merged_stem} ({counter}).mp3')
+            counter += 1
+        command = ['ffmpeg', '-y']
+        for path in saved_paths:
+            command.extend(['-i', path])
+        filter_parts = []
+        concat_inputs = []
+        for index in range(len(saved_paths)):
+            filter_parts.append(f'[{index}:a]aformat=sample_rates=44100:channel_layouts=stereo[a{index}]')
+            concat_inputs.append(f'[a{index}]')
+        filter_parts.append(f'{"".join(concat_inputs)}concat=n={len(saved_paths)}:v=0:a=1[outa]')
+        command.extend(['-filter_complex', ';'.join(filter_parts), '-map', '[outa]', '-c:a', 'libmp3lame', '-q:a', '2', candidate])
+        completed = await asyncio.to_thread(subprocess.run, command, capture_output=True, text=True, check=False)
+        if completed.returncode:
+            log.warning('Could not join uploaded audio: %s', completed.stderr[-1000:])
+            if os.path.exists(candidate):
+                try:
+                    os.remove(candidate)
+                except OSError:
+                    pass
+            raise web.HTTPBadRequest(reason='could not join the selected audio files')
+        stem = pathlib.Path(candidate).stem
 
     info = SimpleNamespace(
-        filename=os.path.relpath(candidate, root),
+        filename=pathlib.Path(os.path.relpath(candidate, root)).as_posix(),
         title=stem,
         url=None,
         subtitle_files=[],
@@ -1034,8 +1088,9 @@ async def transcribe_upload(request):
         raise web.HTTPBadGateway(reason=str(exc)) from exc
     return web.json_response({
         'status': 'ok',
-        'filename': os.path.relpath(candidate, root),
+        'filename': pathlib.Path(os.path.relpath(candidate, root)).as_posix(),
         'result': result,
+        'source_files': [pathlib.Path(os.path.relpath(path, root)).as_posix() for path in saved_paths],
     })
 
 @routes.post(config.URL_PREFIX + 'cancel-add')
@@ -1482,5 +1537,6 @@ if __name__ == '__main__':
         web.run_app(app, host=config.HOST, port=int(config.PORT), reuse_port=supports_reuse_port(), ssl_context=ssl_context, access_log=isAccessLogEnabled())
     else:
         web.run_app(app, host=config.HOST, port=int(config.PORT), reuse_port=supports_reuse_port(), access_log=isAccessLogEnabled())
+    log.info("web.run_app finished")
     if _RESTART_FOR_UPDATE:
         sys.exit(42)

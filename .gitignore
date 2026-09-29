@@ -52,3 +52,8 @@ pending*
 
 __pycache__
 .venv
+
+# Runtime downloads and state
+/downloads/
+/state/
+/temp/
