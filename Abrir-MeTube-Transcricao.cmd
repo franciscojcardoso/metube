@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 set "HOST=127.0.0.1"
 set "PORT=8082"
-set "DOWNLOAD_DIR=%~dp0downloads"
+set "DOWNLOAD_DIR=%USERPROFILE%\Downloads\Metube"
 set "STATE_DIR=%~dp0state"
 set "TEMP_DIR=%~dp0temp"
 set "TRANSCRIPTION_URL=http://127.0.0.1:9002/v1/audio/transcriptions"
@@ -11,6 +11,13 @@ set "TRANSCRIPTION_API_KEY=metube-local-whisper"
 set "TRANSCRIPTION_MODEL=whisper-1"
 set "TRANSCRIPTION_TIMEOUT=7200"
 set "LOG_FILE=%STATE_DIR%\metube.log"
+
+if not exist "%DOWNLOAD_DIR%" mkdir "%DOWNLOAD_DIR%"
+if not exist "%STATE_DIR%" mkdir "%STATE_DIR%"
+if not exist "%TEMP_DIR%" mkdir "%TEMP_DIR%"
+if exist "%~dp0downloads" (
+  robocopy "%~dp0downloads" "%DOWNLOAD_DIR%" /mov /e >nul 2>&1
+)
 
 docker start metube-transcricao-whisper >nul 2>&1
 if errorlevel 1 (

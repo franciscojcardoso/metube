@@ -155,6 +155,8 @@ class Config:
                     sys.exit(1)
                 setattr(self, k, v in ('true', 'True', 'on', '1'))
 
+        os.makedirs(self.DOWNLOAD_DIR, exist_ok=True)
+
         if not self.URL_PREFIX.endswith('/'):
             self.URL_PREFIX += '/'
 
